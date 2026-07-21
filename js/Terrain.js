@@ -1,4 +1,12 @@
-import { LEVEL_LAYOUT, P_D, Vec2, orderSize, originX, terrainTop } from './config.js';
+import {
+  LEVEL_LAYOUT,
+  SHATTER_BALL_COUNT,
+  SHATTER_KICK_MAX,
+  SHATTER_KICK_MIN,
+  orderSize,
+  originX,
+  terrainTop,
+} from './config.js';
 import { Box } from './Box.js';
 import { CirclePiece } from './CirclePiece.js';
 
@@ -7,15 +15,21 @@ function nodeKey(box) {
 }
 
 export class Terrain {
-  constructor(world) {
+  /**
+   * @param {*} world Planck world
+   * @param {{ boxes: import('pixi.js').Container, particles: import('pixi.js').Container }} layers
+   */
+  constructor(world, layers = null) {
     this.world = world;
+    this.boxLayer = layers && layers.boxes;
+    this.particleLayer = layers && layers.particles;
     this.intact = new Map();
     this.freeParticles = [];
     this._nextRootId = 0;
   }
 
   createNode(order, x, y, gx, gy, rootId) {
-    const box = new Box(this.world, order, x, y, gx, gy, rootId);
+    const box = new Box(this.world, order, x, y, gx, gy, rootId, this.boxLayer);
     this.intact.set(nodeKey(box), box);
     return box;
   }
@@ -32,17 +46,20 @@ export class Terrain {
   }
 
   shatterToParticles(node) {
-    const s = P_D;
-    const centers = [
-      Vec2(node.x + s * 0.5, node.y + s * 0.5),
-      Vec2(node.x + s * 1.5, node.y + s * 0.5),
-      Vec2(node.x + s * 0.5, node.y + s * 1.5),
-      Vec2(node.x + s * 1.5, node.y + s * 1.5),
-    ];
-    for (const c of centers) {
-      const piece = new CirclePiece(this.world, c.x, c.y);
+    const n = Math.max(1, SHATTER_BALL_COUNT | 0);
+    const cols = Math.ceil(Math.sqrt(n));
+    const rows = Math.ceil(n / cols);
+    const cellW = node.size / cols;
+    const cellH = node.size / rows;
+
+    for (let i = 0; i < n; i++) {
+      const col = i % cols;
+      const row = (i / cols) | 0;
+      const cx = node.x + (col + 0.5) * cellW;
+      const cy = node.y + (row + 0.5) * cellH;
+      const piece = new CirclePiece(this.world, cx, cy, this.particleLayer);
       this.freeParticles.push(piece);
-      piece.kick(25, 70);
+      piece.kick(SHATTER_KICK_MIN, SHATTER_KICK_MAX);
     }
   }
 
@@ -108,13 +125,9 @@ export class Terrain {
     this.initFromLayout();
   }
 
-  draw(ctx, view) {
-    for (const node of this.intact.values()) {
-      node.draw(ctx, view);
-    }
-    ctx.fillStyle = '#e0b26a';
+  syncGfx() {
     for (const piece of this.freeParticles) {
-      piece.draw(ctx, view);
+      piece.syncGfx();
     }
   }
 }

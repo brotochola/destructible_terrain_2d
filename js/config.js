@@ -21,6 +21,11 @@ export function colorForOrder(n) {
   return ORDER_PALETTE[i];
 }
 
+/** '#rrggbb' → 0xrrggbb for Pixi. */
+export function hexToNum(hex) {
+  return parseInt(hex.replace("#", ""), 16);
+}
+
 /**
  * Root boxes in layout-local px (added to originX / terrainTop).
  * order N → size P_D*2^N, full shatter → (2^N)^2 bolitas.
@@ -29,6 +34,13 @@ export const LEVEL_LAYOUT = [
   { order: 7, x: 0, y: 0 },
   { order: 7, x: orderSize(7), y: 100 },
   { order: 7, x: orderSize(7) * 2, y: 200 },
+  { order: 7, x: orderSize(7) * 3, y: 300 },
+  { order: 7, x: orderSize(7) * 4, y: 400 },
+  { order: 7, x: orderSize(7) * 5, y: 500 },
+  { order: 7, x: orderSize(7) * 6, y: 600 },
+  { order: 7, x: orderSize(7) * 7, y: 700 },
+  { order: 7, x: orderSize(7) * 8, y: 800 },
+  { order: 7, x: orderSize(7) * 9, y: 900 },
 ];
 
 function layoutBounds(layout) {
@@ -57,9 +69,15 @@ export const CHAR_SIZE = P_D * 1.4;
 export const WALK_SPEED = px2m(120);
 export const JUMP_IMPULSE = px2m(48);
 export const FAST_FALL_IMPULSE = px2m(8);
-export const LASER_RANGE = px2m(400);
+export const LASER_RANGE = px2m(800);
 export const LASER_FLASH_MS = 100;
 export const LASER_COOLDOWN_MS = 50;
+
+/** Balls spawned when an order-1 box shatters. */
+export const SHATTER_BALL_COUNT = 3;
+/** Impulse magnitude range (px-equivalent) applied to each shatter ball. */
+export const SHATTER_KICK_MIN = 0;
+export const SHATTER_KICK_MAX = 50;
 
 export const MIN_ZOOM = 0.15;
 export const MAX_ZOOM = 12;

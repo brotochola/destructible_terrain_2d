@@ -1,5 +1,6 @@
-import { colorForOrder, orderSize, Vec2, px2m } from './config.js';
+import { colorForOrder, hexToNum, orderSize, Vec2, px2m } from './config.js';
 import { GameObject } from './GameObject.js';
+import { Graphics } from './Renderer.js';
 
 export class Box extends GameObject {
   /**
@@ -9,8 +10,9 @@ export class Box extends GameObject {
    * @param {number} gx grid index within root
    * @param {number} gy grid index within root
    * @param {number|string} rootId unique per root mamushka
+   * @param {import('pixi.js').Container} [layer]
    */
-  constructor(world, order, x, y, gx, gy, rootId) {
+  constructor(world, order, x, y, gx, gy, rootId, layer = null) {
     const size = orderSize(order);
     super(
       world,
@@ -28,13 +30,14 @@ export class Box extends GameObject {
     this.y = y;
     this.size = size;
     this.createBoxFixture(px2m(size / 2), px2m(size / 2), { friction: 0.9 });
-  }
 
-  draw(ctx, view) {
-    ctx.fillStyle = colorForOrder(this.order);
-    ctx.fillRect(this.x, this.y, this.size, this.size);
-    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-    ctx.lineWidth = 1 / view.scale;
-    ctx.strokeRect(this.x, this.y, this.size, this.size);
+    if (layer) {
+      this.gfx = new Graphics()
+        .rect(0, 0, size, size)
+        .fill(hexToNum(colorForOrder(order)))
+        .stroke({ width: 0.5, color: 0x000000, alpha: 0.35 });
+      this.gfx.position.set(x, y);
+      layer.addChild(this.gfx);
+    }
   }
 }

@@ -17,22 +17,17 @@ import {
 } from './config.js';
 import { Camera } from './Camera.js';
 import { Character } from './Character.js';
+import { FrameFps, MsMeter } from './FpsMeter.js';
+import { Renderer } from './Renderer.js';
 import { Terrain } from './Terrain.js';
 
 export class Game {
   constructor() {
-    this.canvas = document.getElementById('c');
-    this.canvas.width = W;
-    this.canvas.height = H;
-    this.ctx = this.canvas.getContext('2d');
-
-    this.world = new pl.World(Vec2(0, 22));
-    this.addWall(PHYS_W / 2, PHYS_H + 10, PHYS_W + 40, 20);
-    this.addWall(-10, PHYS_H / 2, 20, PHYS_H + 40);
-    this.addWall(PHYS_W + 10, PHYS_H / 2, 20, PHYS_H + 40);
-
-    this.camera = new Camera(originX + contentW / 2, terrainTop - 40);
-    this.terrain = new Terrain(this.world);
+    this.renderer = null;
+    this.canvas = null;
+    this.world = null;
+    this.camera = null;
+    this.terrain = null;
     this.character = null;
 
     this.lasers = [];
@@ -45,8 +40,32 @@ export class Game {
     this.firing = false;
     this.lastFireAt = 0;
 
+    this.worldMs = new MsMeter();
+    this.renderMs = new MsMeter();
+    this.frameFps = new FrameFps();
+
     this.statIntact = document.getElementById('stat-intact');
     this.statFree = document.getElementById('stat-free');
+    this.statWorldMs = document.getElementById('stat-world-ms');
+    this.statRenderMs = document.getElementById('stat-render-ms');
+    this.statFps = document.getElementById('stat-fps');
+  }
+
+  async init() {
+    this.renderer = new Renderer();
+    await this.renderer.init();
+    this.canvas = this.renderer.canvas;
+
+    this.world = new pl.World(Vec2(0, 22));
+    this.addWall(PHYS_W / 2, PHYS_H + 10, PHYS_W + 40, 20);
+    this.addWall(-10, PHYS_H / 2, 20, PHYS_H + 40);
+    this.addWall(PHYS_W + 10, PHYS_H / 2, 20, PHYS_H + 40);
+
+    this.camera = new Camera(originX + contentW / 2, terrainTop - 40);
+    this.terrain = new Terrain(this.world, {
+      boxes: this.renderer.boxes,
+      particles: this.renderer.particles,
+    });
 
     this.bindContacts();
     this.bindInput();
@@ -175,7 +194,7 @@ export class Game {
     }
     const x = originX + contentW / 2;
     const y = terrainTop - CHAR_SIZE * 3;
-    this.character = new Character(this.world, x, y);
+    this.character = new Character(this.world, x, y, this.renderer.actors);
   }
 
   fireLaser() {
@@ -227,27 +246,7 @@ export class Game {
     }
   }
 
-  drawLasers(ctx, viewScale) {
-    if (!this.lasers.length) return;
-    ctx.lineCap = 'round';
-    for (const L of this.lasers) {
-      ctx.strokeStyle = 'rgba(126,249,255,0.35)';
-      ctx.lineWidth = 4 / viewScale;
-      ctx.beginPath();
-      ctx.moveTo(L.x0, L.y0);
-      ctx.lineTo(L.x1, L.y1);
-      ctx.stroke();
-      ctx.strokeStyle = '#7ef9ff';
-      ctx.lineWidth = 1.5 / viewScale;
-      ctx.beginPath();
-      ctx.moveTo(L.x0, L.y0);
-      ctx.lineTo(L.x1, L.y1);
-      ctx.stroke();
-    }
-  }
-
   draw() {
-    const ctx = this.ctx;
     const vs = this.camera.viewScale();
     const view = {
       scale: vs,
@@ -256,33 +255,32 @@ export class Game {
       mouseSY: this.mouseSY,
     };
 
-    ctx.fillStyle = '#0e1620';
-    ctx.fillRect(0, 0, W, H);
-
-    ctx.save();
-    ctx.translate(W / 2, H / 2);
-    ctx.scale(vs, vs);
-    ctx.translate(-this.camera.cx, -this.camera.cy);
-
-    this.terrain.draw(ctx, view);
-    this.drawLasers(ctx, vs);
-    if (this.character) this.character.draw(ctx, view);
-
-    ctx.restore();
+    this.renderer.applyCamera(this.camera);
+    this.terrain.syncGfx();
+    this.renderer.drawLasers(this.lasers, vs);
+    if (this.character) this.character.syncGfx(view);
+    this.renderer.render();
 
     this.statIntact.textContent = this.terrain.intact.size;
     this.statFree.textContent = this.terrain.freeParticles.length;
+    this.statWorldMs.textContent = this.worldMs.ms.toFixed(2);
+    this.statRenderMs.textContent = this.renderMs.ms.toFixed(2);
+    this.statFps.textContent = this.frameFps.fps.toFixed(0);
   }
 
   reset() {
     this.terrain.reset();
     this.lasers.length = 0;
+    this.renderer.clearLasers();
     this.camera.resetZoom();
     this.spawnCharacter();
     this.camera.follow(this.character);
   }
 
   loop = (t) => {
+    this.frameFps.tick(t);
+
+    this.worldMs.begin();
     if (this.character) this.character.update(this.keys);
     if (this.firing && t - this.lastFireAt >= LASER_COOLDOWN_MS) {
       this.fireLaser();
@@ -291,11 +289,17 @@ export class Game {
     this.world.step(1 / 60, 8, 3);
     this.updateLasers(t);
     this.camera.follow(this.character);
+    this.worldMs.end();
+
+    this.renderMs.begin();
     this.draw();
+    this.renderMs.end();
+
     requestAnimationFrame(this.loop);
   };
 
-  start() {
+  async start() {
+    await this.init();
     this.terrain.initFromLayout();
     this.spawnCharacter();
     this.camera.follow(this.character);

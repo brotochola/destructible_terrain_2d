@@ -22,12 +22,12 @@ export class GameObject {
   }
 
   destroy() {
+    if (this.gfx) {
+      this.gfx.destroy();
+      this.gfx = null;
+    }
     if (!this.body) return;
     this.world.destroyBody(this.body);
     this.body = null;
-  }
-
-  draw(_ctx, _view) {
-    // subclasses implement
   }
 }

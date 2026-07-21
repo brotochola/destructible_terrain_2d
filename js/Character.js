@@ -10,9 +10,10 @@ import {
   px2m,
 } from './config.js';
 import { GameObject } from './GameObject.js';
+import { Graphics } from './Renderer.js';
 
 export class Character extends GameObject {
-  constructor(world, x, y) {
+  constructor(world, x, y, layer = null) {
     super(
       world,
       {
@@ -30,6 +31,11 @@ export class Character extends GameObject {
       friction: 0.4,
       restitution: 0,
     });
+
+    if (layer) {
+      this.gfx = new Graphics();
+      layer.addChild(this.gfx);
+    }
   }
 
   addGroundContact() {
@@ -67,21 +73,22 @@ export class Character extends GameObject {
     return Math.atan2(mouseSY - sy, mouseSX - sx);
   }
 
-  draw(ctx, view) {
+  syncGfx(view) {
+    if (!this.gfx || !this.body) return;
     const { x: cx, y: cy } = this.getPositionPx();
-    ctx.fillStyle = '#6ec8ff';
-    ctx.fillRect(cx - CHAR_SIZE / 2, cy - CHAR_SIZE / 2, CHAR_SIZE, CHAR_SIZE);
-    ctx.strokeStyle = '#dff6ff';
-    ctx.lineWidth = 1.5 / view.scale;
-    ctx.strokeRect(cx - CHAR_SIZE / 2, cy - CHAR_SIZE / 2, CHAR_SIZE, CHAR_SIZE);
-
+    const half = CHAR_SIZE / 2;
     const ang = this.aimAngle(view.mouseSX, view.mouseSY, view.camera, view.scale);
     const len = CHAR_SIZE * 1.6;
-    ctx.strokeStyle = '#ff8a5c';
-    ctx.lineWidth = 2 / view.scale;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(cx + Math.cos(ang) * len, cy + Math.sin(ang) * len);
-    ctx.stroke();
+    const lw = 1.5 / view.scale;
+
+    this.gfx.clear();
+    this.gfx.rect(cx - half, cy - half, CHAR_SIZE, CHAR_SIZE).fill(0x6ec8ff);
+    this.gfx.rect(cx - half, cy - half, CHAR_SIZE, CHAR_SIZE).stroke({
+      width: lw,
+      color: 0xdff6ff,
+    });
+    this.gfx.moveTo(cx, cy);
+    this.gfx.lineTo(cx + Math.cos(ang) * len, cy + Math.sin(ang) * len);
+    this.gfx.stroke({ width: 2 / view.scale, color: 0xff8a5c });
   }
 }
