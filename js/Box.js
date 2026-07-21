@@ -1,11 +1,17 @@
-import { LEVEL_COLOR, LEVEL_SIZE, Vec2, px2m } from './config.js';
+import { colorForOrder, orderSize, Vec2, px2m } from './config.js';
 import { GameObject } from './GameObject.js';
 
 export class Box extends GameObject {
-  constructor(world, level, gx, gy, originX, terrainTop) {
-    const size = LEVEL_SIZE[level];
-    const x = originX + gx * size;
-    const y = terrainTop + gy * size;
+  /**
+   * @param {number} order mamushka depth
+   * @param {number} x world px top-left
+   * @param {number} y world px top-left
+   * @param {number} gx grid index within root
+   * @param {number} gy grid index within root
+   * @param {number|string} rootId unique per root mamushka
+   */
+  constructor(world, order, x, y, gx, gy, rootId) {
+    const size = orderSize(order);
     super(
       world,
       {
@@ -14,9 +20,10 @@ export class Box extends GameObject {
       },
       'intact'
     );
-    this.level = level;
+    this.order = order;
     this.gx = gx;
     this.gy = gy;
+    this.rootId = rootId;
     this.x = x;
     this.y = y;
     this.size = size;
@@ -24,7 +31,7 @@ export class Box extends GameObject {
   }
 
   draw(ctx, view) {
-    ctx.fillStyle = LEVEL_COLOR[this.level];
+    ctx.fillStyle = colorForOrder(this.order);
     ctx.fillRect(this.x, this.y, this.size, this.size);
     ctx.strokeStyle = 'rgba(0,0,0,0.35)';
     ctx.lineWidth = 1 / view.scale;

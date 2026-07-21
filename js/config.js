@@ -3,19 +3,54 @@ export const H = window.innerHeight;
 export const ZOOM = 4;
 export const PTM = 10;
 export const P_D = 5;
-export const LEVEL_SIZE = [P_D, P_D * 2, P_D * 4, P_D * 8, P_D * 16]; // 5,10,20,40,80
-export const TOP_LEVEL = LEVEL_SIZE.length - 1;
-export const LEVEL_COLOR = ['#caa26a', '#8a6d43', '#5f5240', '#3d3a33', '#242220'];
 
 export const px2m = (px) => px / PTM;
 export const m2px = (m) => m * PTM;
 
-export const BIG_N = 4;
-export const bigSize = BIG_N * LEVEL_SIZE[TOP_LEVEL];
+/** Side length in px for an order-N mamushka (leaf side = P_D when N=0 conceptually; shatter at N=1). */
+export function orderSize(n) {
+  return P_D * 2 ** n;
+}
 
-export const PHYS_W = bigSize * 3;
-export const PHYS_H = bigSize * 3;
-export const originX = (PHYS_W - bigSize) / 2;
+/** Palette base; higher orders get darker via colorForOrder. */
+const ORDER_PALETTE = ["#caa26a", "#8a6d43", "#5f5240", "#3d3a33", "#242220"];
+
+export function colorForOrder(n) {
+  const i =
+    ((n % ORDER_PALETTE.length) + ORDER_PALETTE.length) % ORDER_PALETTE.length;
+  return ORDER_PALETTE[i];
+}
+
+/**
+ * Root boxes in layout-local px (added to originX / terrainTop).
+ * order N → size P_D*2^N, full shatter → (2^N)^2 bolitas.
+ */
+export const LEVEL_LAYOUT = [
+  { order: 7, x: 0, y: 0 },
+  { order: 7, x: orderSize(7), y: 100 },
+  { order: 7, x: orderSize(7) * 2, y: 200 },
+];
+
+function layoutBounds(layout) {
+  let w = 0;
+  let h = 0;
+  for (const item of layout) {
+    const s = orderSize(item.order);
+    w = Math.max(w, item.x + s);
+    h = Math.max(h, item.y + s);
+  }
+  return { w, h };
+}
+
+export const terrainBounds = layoutBounds(LEVEL_LAYOUT);
+export const contentW = Math.max(terrainBounds.w, orderSize(1));
+export const contentH = Math.max(terrainBounds.h, orderSize(1));
+/** Largest side of content — used for default camera zoom. */
+export const contentSize = Math.max(contentW, contentH);
+
+export const PHYS_W = contentW * 3;
+export const PHYS_H = contentH * 3;
+export const originX = (PHYS_W - contentW) / 2;
 export const terrainTop = PHYS_H * 0.22;
 
 export const CHAR_SIZE = P_D * 1.4;

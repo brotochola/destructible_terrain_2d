@@ -1,4 +1,4 @@
-import { H, MAX_ZOOM, MIN_ZOOM, W, ZOOM, bigSize, m2px } from './config.js';
+import { H, MAX_ZOOM, MIN_ZOOM, W, ZOOM, contentSize, m2px } from './config.js';
 
 export class Camera {
   constructor(cx, cy) {
@@ -8,7 +8,7 @@ export class Camera {
   }
 
   defaultZoom() {
-    return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, (Math.min(W, H) * 0.92) / (bigSize * ZOOM)));
+    return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, (Math.min(W, H) * 0.92) / (contentSize * ZOOM)));
   }
 
   clampZoom(z) {

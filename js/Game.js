@@ -8,7 +8,7 @@ import {
   PHYS_W,
   Vec2,
   W,
-  bigSize,
+  contentW,
   m2px,
   originX,
   pl,
@@ -31,7 +31,7 @@ export class Game {
     this.addWall(-10, PHYS_H / 2, 20, PHYS_H + 40);
     this.addWall(PHYS_W + 10, PHYS_H / 2, 20, PHYS_H + 40);
 
-    this.camera = new Camera(originX + bigSize / 2, terrainTop - 40);
+    this.camera = new Camera(originX + contentW / 2, terrainTop - 40);
     this.terrain = new Terrain(this.world);
     this.character = null;
 
@@ -173,7 +173,7 @@ export class Game {
       this.character.destroy();
       this.character = null;
     }
-    const x = originX + bigSize / 2;
+    const x = originX + contentW / 2;
     const y = terrainTop - CHAR_SIZE * 3;
     this.character = new Character(this.world, x, y);
   }
@@ -296,7 +296,7 @@ export class Game {
   };
 
   start() {
-    this.terrain.initGrid();
+    this.terrain.initFromLayout();
     this.spawnCharacter();
     this.camera.follow(this.character);
     requestAnimationFrame(this.loop);

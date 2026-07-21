@@ -1,9 +1,9 @@
-import { BIG_N, LEVEL_SIZE, TOP_LEVEL, Vec2, originX, terrainTop } from './config.js';
+import { LEVEL_LAYOUT, P_D, Vec2, orderSize, originX, terrainTop } from './config.js';
 import { Box } from './Box.js';
 import { CirclePiece } from './CirclePiece.js';
 
-function nodeKey(level, gx, gy) {
-  return level + '_' + gx + '_' + gy;
+function nodeKey(box) {
+  return box.rootId + '_' + box.order + '_' + box.gx + '_' + box.gy;
 }
 
 export class Terrain {
@@ -11,24 +11,28 @@ export class Terrain {
     this.world = world;
     this.intact = new Map();
     this.freeParticles = [];
+    this._nextRootId = 0;
   }
 
-  createIntactNode(level, gx, gy) {
-    const box = new Box(this.world, level, gx, gy, originX, terrainTop);
-    this.intact.set(nodeKey(level, gx, gy), box);
+  createNode(order, x, y, gx, gy, rootId) {
+    const box = new Box(this.world, order, x, y, gx, gy, rootId);
+    this.intact.set(nodeKey(box), box);
     return box;
   }
 
-  initGrid() {
-    for (let gx = 0; gx < BIG_N; gx++) {
-      for (let gy = 0; gy < BIG_N; gy++) {
-        this.createIntactNode(TOP_LEVEL, gx, gy);
-      }
+  addRoot({ order, x, y }) {
+    const rootId = this._nextRootId++;
+    return this.createNode(order, originX + x, terrainTop + y, 0, 0, rootId);
+  }
+
+  initFromLayout() {
+    for (const item of LEVEL_LAYOUT) {
+      this.addRoot(item);
     }
   }
 
   shatterToParticles(node) {
-    const s = LEVEL_SIZE[0];
+    const s = P_D;
     const centers = [
       Vec2(node.x + s * 0.5, node.y + s * 0.5),
       Vec2(node.x + s * 1.5, node.y + s * 0.5),
@@ -43,20 +47,28 @@ export class Terrain {
   }
 
   breakNode(node, ix, iy) {
-    if (!this.intact.has(nodeKey(node.level, node.gx, node.gy))) return;
+    if (!this.intact.has(nodeKey(node))) return;
     node.destroy();
-    this.intact.delete(nodeKey(node.level, node.gx, node.gy));
+    this.intact.delete(nodeKey(node));
 
-    if (node.level === 1) {
+    if (node.order === 1) {
       this.shatterToParticles(node);
       return;
     }
 
-    const childLevel = node.level - 1;
+    const childOrder = node.order - 1;
+    const childSize = orderSize(childOrder);
     let impactChild = null;
     for (let dx = 0; dx < 2; dx++) {
       for (let dy = 0; dy < 2; dy++) {
-        const child = this.createIntactNode(childLevel, node.gx * 2 + dx, node.gy * 2 + dy);
+        const child = this.createNode(
+          childOrder,
+          node.x + dx * childSize,
+          node.y + dy * childSize,
+          node.gx * 2 + dx,
+          node.gy * 2 + dy,
+          node.rootId
+        );
         if (
           ix !== undefined &&
           ix >= child.x &&
@@ -88,11 +100,12 @@ export class Terrain {
     this.intact.clear();
     for (const piece of this.freeParticles) piece.destroy();
     this.freeParticles.length = 0;
+    this._nextRootId = 0;
   }
 
   reset() {
     this.clear();
-    this.initGrid();
+    this.initFromLayout();
   }
 
   draw(ctx, view) {
