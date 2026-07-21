@@ -71,13 +71,23 @@ export const JUMP_IMPULSE = px2m(48);
 export const FAST_FALL_IMPULSE = px2m(8);
 export const LASER_RANGE = px2m(800);
 export const LASER_FLASH_MS = 100;
-export const LASER_COOLDOWN_MS = 50;
+export const LASER_COOLDOWN_MS = 10;
 
 /** Balls spawned when an order-1 box shatters. */
 export const SHATTER_BALL_COUNT = 3;
 /** Impulse magnitude range (px-equivalent) applied to each shatter ball. */
 export const SHATTER_KICK_MIN = 0;
 export const SHATTER_KICK_MAX = 50;
+
+/** Order ≤ this → dynamic body + WeldJoint to neighbors. */
+export const DYNAMIC_MAX_ORDER = 4;
+export const BOX_DENSITY = 1.0;
+export const BOX_FRICTION = 0.9;
+export const BOX_RESTITUTION = 0;
+export const BOX_LINEAR_DAMPING = 0.1;
+export const BOX_ANGULAR_DAMPING = 0.1;
+/** AABB touch tolerance (world px) when finding weld neighbors. */
+export const BOX_TOUCH_EPS_PX = 1;
 
 export const MIN_ZOOM = 0.15;
 export const MAX_ZOOM = 12;
