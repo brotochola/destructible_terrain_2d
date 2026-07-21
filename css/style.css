@@ -1,0 +1,8 @@
+html, body { margin: 0; padding: 0; background: #0e1620; overflow: hidden; font-family: sans-serif; }
+#ui { position: fixed; top: 8px; left: 8px; color: #cfe8ff; font-size: 13px; background: #0009; padding: 8px 12px; border-radius: 8px; line-height: 1.5; max-width: 70vw; user-select: none; }
+#ui b { color: #fff; }
+button { margin-top: 4px; background: #274; color: #fff; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer; }
+button:hover { background: #385; }
+#zoomctl { position: fixed; bottom: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; }
+#zoomctl button { width: 44px; height: 44px; font-size: 22px; border-radius: 50%; margin: 0; background: #1b2733cc; border: 1px solid #3a5; }
+canvas { display: block; cursor: crosshair; touch-action: none; }
