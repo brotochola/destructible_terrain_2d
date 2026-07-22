@@ -82,7 +82,7 @@ export class Box extends GameObject {
 
     if (layer && rockTexture) {
       // Visual > collider: overhang hides seams between neighbors.
-      const visual = rockMushVisualSize(size);
+      const visual = rockMushVisualSize(size, order);
       this.gfx = new Sprite(rockTexture);
       this.gfx.anchor.set(0.5);
       this.gfx.width = visual;

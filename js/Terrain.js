@@ -18,7 +18,7 @@ import {
 import { Box } from "./Box.js";
 import { CirclePiece, ParticlePool } from "./CirclePiece.js";
 import { SpatialHash } from "./SpatialHash.js";
-import { pickMush, resolveMushHint, synthesizeRecipe } from "./rockMush.js";
+import { pickMush, resolveMushHint, synthesizeRecipe, bodyQuadToUvQuad } from "./rockMush.js";
 
 function nodeKey(box) {
   return box.rootId + "_" + box.order + "_" + box.gx + "_" + box.gy;
@@ -359,6 +359,7 @@ export class Terrain {
     const parentGy = node.gy;
     const parentOrder = node.order;
     const parentMushVariant = node.mushVariant;
+    const parentTexRot = node.texRot || 0;
     const rootId = node.rootId;
     const shatter = parentOrder === 1;
     node.destroy();
@@ -384,7 +385,15 @@ export class Terrain {
     for (let dx = 0; dx < 2; dx++) {
       for (let dy = 0; dy < 2; dy++) {
         const place = childPlacement(pose, parentSize, dx, dy);
-        const mushHint = parentRecipe[dy * 2 + dx] || null;
+        const uv = bodyQuadToUvQuad(dx, dy, parentTexRot);
+        const base = parentRecipe[uv.dy * 2 + uv.dx] || {
+          variant: 0,
+          rot: 0,
+        };
+        const mushHint = {
+          variant: base.variant || 0,
+          rot: parentTexRot + base.rot,
+        };
         this.createNode(
           childOrder,
           place.x,

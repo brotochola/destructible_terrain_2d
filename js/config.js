@@ -32,8 +32,8 @@ export const ROCK_MUSH_WORLD_VISUAL = 64;
 /** Order-1 bake tex side (px). Higher orders = this * 2^(n-1). */
 export const ROCK_MUSH_MIN_TEX = 128;
 /** Highest order with its own baked atlas (128→2048). */
-export const ROCK_MUSH_BAKE_MAX_ORDER = 5;
-export const ROCK_MUSH_SEED = 42;
+export const ROCK_MUSH_BAKE_MAX_ORDER = 4;
+export const ROCK_MUSH_SEED = 1212;
 /** Stamp density for order-1 cluster bake. */
 export const ROCK_MUSH_DENSITY = 1;
 
@@ -42,17 +42,18 @@ export function orderTexSize(n) {
   return ROCK_MUSH_MIN_TEX * 2 ** (n - 1);
 }
 
-/** Visual / collider scale (world visual / order-1 collider). */
+/** Visual / collider scale for order-1 (world neighbors + baked into order-2 atlas). */
 export const ROCK_MUSH_VISUAL_RATIO = 1.2; //ROCK_MUSH_WORLD_VISUAL / orderSize(1);
 
 /** Visual overflow (world px) for a collider of `boxSize`. */
-export function rockMushOverflow(boxSize) {
-  return (boxSize * (ROCK_MUSH_VISUAL_RATIO - 1)) / 2;
+export function rockMushOverflow(boxSize, order = 1) {
+  return (rockMushVisualSize(boxSize, order) - boxSize) / 2;
 }
 
-/** Visual sprite side for a collider of `boxSize` (world px). */
-export function rockMushVisualSize(boxSize) {
-  return boxSize * ROCK_MUSH_VISUAL_RATIO;
+/** Visual sprite side. Order-1 uses ratio; order≥2 = collider (ratio baked into atlas). */
+export function rockMushVisualSize(boxSize, order = 1) {
+  if (order <= 1) return boxSize * ROCK_MUSH_VISUAL_RATIO;
+  return boxSize;
 }
 
 /** Procedural map size (layout px). */
@@ -124,7 +125,7 @@ export const JUMP_SPEED = px2m(220);
 export const FAST_FALL_IMPULSE = px2m(8);
 export const LASER_RANGE = px2m(800);
 export const LASER_FLASH_MS = 100;
-export const LASER_COOLDOWN_MS = 1;
+export const LASER_COOLDOWN_MS = 111;
 
 /** Balls spawned when an order-1 box shatters. */
 export const SHATTER_BALL_COUNT = 9;

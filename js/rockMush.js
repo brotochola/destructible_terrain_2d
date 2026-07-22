@@ -4,6 +4,7 @@ import {
   ROCK_MUSH_DENSITY,
   ROCK_MUSH_MIN_TEX,
   ROCK_MUSH_SEED,
+  ROCK_MUSH_VISUAL_RATIO,
   ROCK_PARTICLE_VISUAL,
   orderTexSize,
 } from "./config.js";
@@ -68,7 +69,29 @@ export function resolveMushHint(byOrder, order, hint) {
   if (!byOrder || !hint) return null;
   const variants = texList(byOrder, order);
   if (!variants) return null;
-  return { texture: variants[0], variant: 0, texRot: hint.rot };
+  return {
+    texture: variants[0],
+    variant: hint.variant || 0,
+    texRot: hint.rot,
+  };
+}
+
+/**
+ * Map body-local child quad (dx,dy) → UV quad in parent atlas when parent
+ * sprite has texRot (Pixi CW). Content at body TL after CW 90 came from UV BL.
+ */
+export function bodyQuadToUvQuad(dx, dy, texRot) {
+  let q = Math.round(texRot / QUARTER) % 4;
+  if (q < 0) q += 4;
+  let x = dx;
+  let y = dy;
+  for (let i = 0; i < q; i++) {
+    const nx = y;
+    const ny = 1 - x;
+    x = nx;
+    y = ny;
+  }
+  return { dx: x, dy: y };
 }
 
 /**
@@ -334,14 +357,14 @@ function bakeOrder1Cluster(brushes, rng) {
 }
 
 /**
- * 2× child composite at 1:1 (keeps whole rocks). Fill + seam with stamps so
- * quads do not leave a black cross. Seam stamp px = order-1 stamp px (rocks
- * do not grow when atlas doubles).
+ * 2× child composite. childVisualRatio 1.2 on order-2 bake mimics order-1
+ * display overhang so quads seal; higher orders use 1.0 (fill already in child).
  * Recipe: [{ variant:0, rot }, ×4] index dy*2+dx.
  */
-function bakeComposite(childCanvas, brushes, rng) {
+function bakeComposite(childCanvas, rng, childVisualRatio = 1) {
   const childSize = childCanvas.width;
   const texSize = childSize * 2;
+  const drawSize = childSize * childVisualRatio;
   const canvas = document.createElement("canvas");
   canvas.width = texSize;
   canvas.height = texSize;
@@ -355,24 +378,12 @@ function bakeComposite(childCanvas, brushes, rng) {
       recipe[dy * 2 + dx] = { variant: 0, rot };
       const cx = dx * childSize + childSize / 2;
       const cy = dy * childSize + childSize / 2;
-      drawCentered(ctx, childCanvas, cx, cy, childSize, childSize, rot);
+      drawCentered(ctx, childCanvas, cx, cy, drawSize, drawSize, rot);
     }
   }
 
   if (recipe.length !== 4) {
     throw new Error(`rock mush recipe length ${recipe.length}, want 4`);
-  }
-
-  const stampPx = order1StampPx();
-  const stampR = stampPx / 2;
-  const step = stampPx * 0.55;
-  const seam0 = stampR;
-  const seam1 = texSize - stampR;
-  for (let y = seam0; y <= seam1 + 1e-6; y += step) {
-    stampRock(ctx, brushes, childSize, y, stampPx, rng);
-  }
-  for (let x = seam0; x <= seam1 + 1e-6; x += step) {
-    stampRock(ctx, brushes, x, childSize, stampPx, rng);
   }
 
   // Any opaque pixel in each quad (child mid / seams often transparent).
@@ -433,7 +444,13 @@ export function bakeRockMushTextures(particleTextures, opts = {}) {
   for (let order = 2; order <= maxOrder; order++) {
     const want = orderTexSize(order);
     const rng = mulberry32(seed ^ Math.imul(order, 0x9e3779b9));
-    const { canvas, recipe } = bakeComposite(childCanvas, brushes, rng);
+    const childVisualRatio =
+      order === 2 ? ROCK_MUSH_VISUAL_RATIO : 1;
+    const { canvas, recipe } = bakeComposite(
+      childCanvas,
+      rng,
+      childVisualRatio,
+    );
     if (canvas.width !== want || canvas.height !== want) {
       throw new Error(
         `rock mush order ${order}: got ${canvas.width}px, want ${want}`,
