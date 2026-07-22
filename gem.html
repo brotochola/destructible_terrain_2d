@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PixiJS v8 - Rock Grid Drawing Shader</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #121212;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    #canvas-container {
+      width: 100vw;
+      height: 100vh;
+      display: block;
+    }
+    /* Floating Control UI */
+    .controls {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      background: rgba(24, 24, 27, 0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 20px;
+      border-radius: 12px;
+      color: #e4e4e7;
+      width: 300px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+      z-index: 10;
+    }
+    .controls h2 {
+      font-size: 1.1rem;
+      margin-bottom: 14px;
+      font-weight: 600;
+      color: #f4f4f5;
+    }
+    .control-group {
+      margin-bottom: 14px;
+    }
+    .control-group label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.85rem;
+      margin-bottom: 6px;
+      color: #a1a1aa;
+    }
+    .control-group input[type="range"] {
+      width: 100%;
+      accent-color: #8b5cf6;
+      cursor: pointer;
+    }
+    .button-group {
+      display: flex;
+      gap: 8px;
+      margin-top: 18px;
+    }
+    button {
+      flex: 1;
+      padding: 10px;
+      background: #27272a;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #f4f4f5;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.2s ease;
+    }
+    button:hover {
+      background: #3f3f46;
+    }
+    button.primary {
+      background: #7c3aed;
+      border-color: #6d28d9;
+    }
+    button.primary:hover {
+      background: #6d28d9;
+    }
+  </style>
+
+  <!-- PixiJS v8 CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/pixi.js@8.16.0/dist/pixi.min.js"></script>
+</head>
+<body>
+
+  <div class="controls">
+    <h2>Rock Grid Stroke Shader</h2>
+
+    <div class="control-group">
+      <label>Brush Size <span id="val-brush">35</span></label>
+      <input type="range" id="param-brush" min="10" max="100" value="35">
+    </div>
+
+    <div class="control-group">
+      <label>Rock Distortion <span id="val-distortion">0.035</span></label>
+      <input type="range" id="param-distortion" min="0" max="0.1" step="0.002" value="0.035">
+    </div>
+
+    <div class="control-group">
+      <label>Noise Frequency <span id="val-noise">30</span></label>
+      <input type="range" id="param-noise" min="5" max="80" value="30">
+    </div>
+
+    <div class="control-group">
+      <label>Grid Scale <span id="val-grid">45</span></label>
+      <input type="range" id="param-grid" min="10" max="100" value="45">
+    </div>
+
+    <div class="control-group">
+      <label>Line Thickness <span id="val-thickness">0.10</span></label>
+      <input type="range" id="param-thickness" min="0.02" max="0.3" step="0.01" value="0.10">
+    </div>
+
+    <div class="button-group">
+      <button id="btn-clear">Clear</button>
+    </div>
+  </div>
+
+  <div id="canvas-container"></div>
+
+  <script>
+    (async () => {
+      // 1. Initialize PixiJS v8 Application
+      const app = new PIXI.Application();
+      await app.init({
+        resizeTo: window,
+        backgroundColor: 0x18181b,
+        antialias: true
+      });
+      document.getElementById('canvas-container').appendChild(app.canvas);
+
+      // 2. Default filter vertex (Filter.from does not inject this — PixiJS #10901)
+      const vertexSrc = `
+        in vec2 aPosition;
+        out vec2 vTextureCoord;
+
+        uniform vec4 uInputSize;
+        uniform vec4 uOutputFrame;
+        uniform vec4 uOutputTexture;
+
+        vec4 filterVertexPosition(void) {
+            vec2 position = aPosition * uOutputFrame.zw + uOutputFrame.xy;
+            position.x = position.x * (2.0 / uOutputTexture.x) - 1.0;
+            position.y = position.y * (2.0 * uOutputTexture.z / uOutputTexture.y) - uOutputTexture.z;
+            return vec4(position, 0.0, 1.0);
+        }
+
+        vec2 filterTextureCoord(void) {
+            return aPosition * (uOutputFrame.zw * uInputSize.zw);
+        }
+
+        void main(void) {
+            gl_Position = filterVertexPosition();
+            vTextureCoord = filterTextureCoord();
+        }
+      `;
+
+      // 3. Custom GLSL ES 3.0 Fragment Shader for PixiJS v8
+      const fragmentSrc = `
+        in vec2 vTextureCoord;
+        out vec4 finalColor;
+
+        uniform sampler2D uTexture;
+        uniform float uDistortion;
+        uniform float uNoiseScale;
+        uniform float uGridScale;
+        uniform float uLineThickness;
+
+        // 2D Pseudo-random hash
+        vec2 hash2(vec2 p) {
+            p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+            return fract(sin(p) * 43758.5453);
+        }
+
+        // 2D Gradient Noise
+        float noise(vec2 p) {
+            vec2 i = floor(p);
+            vec2 f = fract(p);
+            vec2 u = f * f * (3.0 - 2.0 * f);
+            return mix(mix(dot(hash2(i + vec2(0.0,0.0)), f - vec2(0.0,0.0)),
+                           dot(hash2(i + vec2(1.0,0.0)), f - vec2(1.0,0.0)), u.x),
+                       mix(dot(hash2(i + vec2(0.0,1.0)), f - vec2(0.0,1.0)),
+                           dot(hash2(i + vec2(1.0,1.0)), f - vec2(1.0,1.0)), u.x), u.y);
+        }
+
+        void main(void) {
+            vec4 texColor = texture(uTexture, vTextureCoord);
+
+            // Don't process empty background pixels
+            if (texColor.a < 0.01) {
+                discard;
+            }
+
+            // 1. Warp UV coordinates with noise for the jagged rock effect
+            vec2 warp = vec2(
+                noise(vTextureCoord * uNoiseScale),
+                noise(vTextureCoord * uNoiseScale + vec2(17.3, 42.1))
+            );
+            vec2 distortedUV = vTextureCoord + warp * uDistortion;
+
+            // 2. Grid lines calculation
+            vec2 grid = abs(fract(distortedUV * uGridScale) - 0.5);
+            float edgeDist = max(grid.x, grid.y);
+
+            // 3. Create crisp line mask with anti-aliasing edge
+            float lineThreshold = 0.5 - (uLineThickness * 0.5);
+            float lineMask = smoothstep(lineThreshold - 0.01, lineThreshold + 0.01, edgeDist);
+
+            // Color palette: Inner dark stone & outer rough rock highlight
+            vec3 innerStone = vec3(0.18, 0.17, 0.16);
+            vec3 edgeHighlight = vec3(0.58, 0.52, 0.45);
+            vec3 rockyColor = mix(innerStone, edgeHighlight, lineMask);
+
+            finalColor = vec4(rockyColor, texColor.a);
+        }
+      `;
+
+      // 4. Create Custom Filter — vertex required (default not applied in GlProgram.from)
+      const rockFilter = PIXI.Filter.from({
+        gl: { vertex: vertexSrc, fragment: fragmentSrc },
+        resources: {
+          rockUniforms: {
+            uDistortion: { value: 0.035, type: 'f32' },
+            uNoiseScale: { value: 30.0, type: 'f32' },
+            uGridScale: { value: 45.0, type: 'f32' },
+            uLineThickness: { value: 0.10, type: 'f32' }
+          }
+        }
+      });
+
+      // 5. Setup Containers & Drawing Layer
+      const drawingContainer = new PIXI.Container();
+      drawingContainer.filters = [rockFilter];
+      app.stage.addChild(drawingContainer);
+
+      const brushGraphics = new PIXI.Graphics();
+      drawingContainer.addChild(brushGraphics);
+
+      // 6. Drawing Interaction State
+      let isDrawing = false;
+      let lastPoint = null;
+      let brushRadius = 35;
+
+      function getPointerPos(e) {
+        return { x: e.clientX, y: e.clientY };
+      }
+
+      function drawStroke(p1, p2) {
+        brushGraphics.circle(p2.x, p2.y, brushRadius).fill({ color: 0xffffff });
+        
+        if (p1) {
+          brushGraphics
+            .moveTo(p1.x, p1.y)
+            .lineTo(p2.x, p2.y)
+            .stroke({ width: brushRadius * 2, color: 0xffffff, cap: 'round', join: 'round' });
+        }
+      }
+
+      window.addEventListener('pointerdown', (e) => {
+        // Ignore clicks on UI panel
+        if (e.target.closest('.controls')) return;
+        isDrawing = true;
+        lastPoint = getPointerPos(e);
+        drawStroke(null, lastPoint);
+      });
+
+      window.addEventListener('pointermove', (e) => {
+        if (!isDrawing) return;
+        const currentPoint = getPointerPos(e);
+        drawStroke(lastPoint, currentPoint);
+        lastPoint = currentPoint;
+      });
+
+      window.addEventListener('pointerup', () => { isDrawing = false; });
+      window.addEventListener('pointercancel', () => { isDrawing = false; });
+
+      // 7. Bind UI Controls to Uniforms
+      const uniforms = rockFilter.resources.rockUniforms.uniforms;
+
+      document.getElementById('param-brush').addEventListener('input', (e) => {
+        brushRadius = parseFloat(e.target.value);
+        document.getElementById('val-brush').innerText = brushRadius;
+      });
+
+      document.getElementById('param-distortion').addEventListener('input', (e) => {
+        uniforms.uDistortion = parseFloat(e.target.value);
+        document.getElementById('val-distortion').innerText = uniforms.uDistortion.toFixed(3);
+      });
+
+      document.getElementById('param-noise').addEventListener('input', (e) => {
+        uniforms.uNoiseScale = parseFloat(e.target.value);
+        document.getElementById('val-noise').innerText = uniforms.uNoiseScale;
+      });
+
+      document.getElementById('param-grid').addEventListener('input', (e) => {
+        uniforms.uGridScale = parseFloat(e.target.value);
+        document.getElementById('val-grid').innerText = uniforms.uGridScale;
+      });
+
+      document.getElementById('param-thickness').addEventListener('input', (e) => {
+        uniforms.uLineThickness = parseFloat(e.target.value);
+        document.getElementById('val-thickness').innerText = uniforms.uLineThickness.toFixed(2);
+      });
+
+      document.getElementById('btn-clear').addEventListener('click', () => {
+        brushGraphics.clear();
+      });
+    })();
+  </script>
+</body>
+</html>

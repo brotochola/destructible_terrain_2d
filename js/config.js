@@ -38,9 +38,9 @@ export const ROCK_EDGE_STROKE_WIDTH_FRAC = 0.02;
 export const ROCK_EDGE_STROKE_WIDTH_MAX = 2;
 
 /** Procedural map size (layout px). */
-export const MAP_W = 5000;
-export const MAP_H = 2000;
-export const MAP_SEED = 42;
+export const MAP_W = 3000;
+export const MAP_H = 1000;
+export const MAP_SEED = 919191;
 /** Noise frequency in order-1 cell units (lower = bigger caves). */
 export const NOISE_SCALE = 0.015;
 export const NOISE_OCTAVES = 2;
@@ -116,7 +116,7 @@ export const SHATTER_KICK_MIN = 0;
 export const SHATTER_KICK_MAX = 50;
 
 /** Order ≤ this → dynamic body + WeldJoint to neighbors. */
-export const DYNAMIC_MAX_ORDER = 3;
+export const DYNAMIC_MAX_ORDER = 2;
 export const BOX_DENSITY = 1.0;
 export const BOX_FRICTION = 0.9;
 export const BOX_RESTITUTION = 0;
@@ -137,6 +137,10 @@ export const PARTICLE_SETTLE_FRAMES = 90;
 export const VIEW_CULL_MARGIN_PX = 120;
 /** Body active if AABB overlaps view expanded by this (≥ LASER_RANGE px). */
 export const PHYS_ACTIVE_MARGIN_PX = 900;
+/** Re-run intact view/active cull when camera moves more than this (px) or zoom changes. */
+export const CULL_DIRTY_PX = 48;
+/** Spatial hash cell size for intact cull queries. */
+export const CULL_CELL_PX = 256;
 export const SOLVER_BUSY_DYNAMIC_COUNT = 200;
 
 export const MIN_ZOOM = 0.033;

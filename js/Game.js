@@ -64,6 +64,12 @@ export class Game {
     this.debugPhys = false;
     this.debugCheckbox = document.getElementById("debug-phys");
     this.debugLegend = document.getElementById("debug-legend");
+    this._hudIntact = -1;
+    this._hudFree = -1;
+    this._hudDyn = -1;
+    this._hudWorld = "";
+    this._hudRender = "";
+    this._hudFps = "";
   }
 
   async init() {
@@ -80,6 +86,7 @@ export class Game {
     this.terrain = new Terrain(this.world, {
       boxes: this.renderer.boxes,
       particles: this.renderer.particles,
+      particleBuckets: this.renderer.particleBuckets,
       particleTextures: this.renderer.particleTextures,
       rockTexture: this.renderer.rockTexture,
     });
@@ -336,12 +343,37 @@ export class Game {
     }
     this.renderer.render();
 
-    this.statIntact.textContent = this.terrain.intact.size;
-    this.statFree.textContent = this.terrain.freeParticles.length;
-    this.statBodies.textContent = this.terrain.dynamicCount();
-    this.statWorldMs.textContent = this.worldMs.ms.toFixed(2);
-    this.statRenderMs.textContent = this.renderMs.ms.toFixed(2);
-    this.statFps.textContent = this.frameFps.fps.toFixed(0);
+    // DOM writes are expensive — only when values change.
+    const intactN = this.terrain.intact.size;
+    const freeN = this.terrain.freeParticles.length;
+    const dynN = this.terrain.dynamicCount();
+    if (intactN !== this._hudIntact) {
+      this._hudIntact = intactN;
+      this.statIntact.textContent = intactN;
+    }
+    if (freeN !== this._hudFree) {
+      this._hudFree = freeN;
+      this.statFree.textContent = freeN;
+    }
+    if (dynN !== this._hudDyn) {
+      this._hudDyn = dynN;
+      this.statBodies.textContent = dynN;
+    }
+    const wMs = this.worldMs.ms.toFixed(2);
+    const rMs = this.renderMs.ms.toFixed(2);
+    const fps = this.frameFps.fps.toFixed(0);
+    if (wMs !== this._hudWorld) {
+      this._hudWorld = wMs;
+      this.statWorldMs.textContent = wMs;
+    }
+    if (rMs !== this._hudRender) {
+      this._hudRender = rMs;
+      this.statRenderMs.textContent = rMs;
+    }
+    if (fps !== this._hudFps) {
+      this._hudFps = fps;
+      this.statFps.textContent = fps;
+    }
   }
 
   reset() {

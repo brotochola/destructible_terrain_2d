@@ -27,6 +27,7 @@ export class Renderer {
     this.boxes = null;
     this.particles = null;
     this.particleTextures = null;
+    this.particleBuckets = null;
     this.rockTexture = null;
     this.fx = null;
     this.actors = null;
@@ -61,8 +62,23 @@ export class Renderer {
 
     this.world = new Container();
     this.boxes = new Container();
-    // Container (not ParticleContainer): two rock PNGs need per-sprite textures.
+    // One ParticleContainer per rock texture (shared TextureSource required).
     this.particles = new Container();
+    this.particleBuckets = this.particleTextures.map(
+      (texture) =>
+        new ParticleContainer({
+          texture,
+          dynamicProperties: {
+            position: true,
+            rotation: true,
+            scale: true,
+            color: true,
+          },
+        }),
+    );
+    for (const bucket of this.particleBuckets) {
+      this.particles.addChild(bucket);
+    }
     this.fx = new Container();
     this.actors = new Container();
     this.debugGfx = new Graphics();
@@ -71,7 +87,7 @@ export class Renderer {
       this.particles,
       this.fx,
       this.actors,
-      this.debugGfx
+      this.debugGfx,
     );
     this.app.stage.addChild(this.world);
 

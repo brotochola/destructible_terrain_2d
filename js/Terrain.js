@@ -1,5 +1,7 @@
 import {
   BOX_TOUCH_EPS_PX,
+  CULL_CELL_PX,
+  CULL_DIRTY_PX,
   LEVEL_LAYOUT,
   MAX_FREE_PARTICLES,
   MAX_MAMUSHKA_ORDER,
@@ -17,6 +19,7 @@ import {
 } from "./config.js";
 import { Box } from "./Box.js";
 import { CirclePiece, ParticlePool } from "./CirclePiece.js";
+import { SpatialHash } from "./SpatialHash.js";
 
 function nodeKey(box) {
   return box.rootId + "_" + box.order + "_" + box.gx + "_" + box.gy;
@@ -220,12 +223,13 @@ const NEIGHBOR_DIRS = [
 export class Terrain {
   /**
    * @param {*} world Planck world
-   * @param {{ boxes: import('pixi.js').Container, particles: import('pixi.js').Container, particleTextures?: import('pixi.js').Texture[], rockTexture?: import('pixi.js').Texture }} layers
+   * @param {{ boxes: import('pixi.js').Container, particles: import('pixi.js').Container, particleBuckets?: import('pixi.js').ParticleContainer[], particleTextures?: import('pixi.js').Texture[], rockTexture?: import('pixi.js').Texture }} layers
    */
   constructor(world, layers = null) {
     this.world = world;
     this.boxLayer = layers && layers.boxes;
     this.particleLayer = layers && layers.particles;
+    this.particleBuckets = (layers && layers.particleBuckets) || null;
     this.particleTextures = layers && layers.particleTextures;
     this.rockTexture = layers && layers.rockTexture;
     this.intact = new Map();
@@ -233,11 +237,18 @@ export class Terrain {
     this.freeParticles = [];
     this.particlePool = new ParticlePool(
       world,
-      this.particleLayer,
+      this.particleBuckets,
       this.particleTextures,
     );
     this._nextRootId = 0;
     this._coalesceCursor = 0;
+    this.cullHash = new SpatialHash(CULL_CELL_PX);
+    /** @type {Set<import('./Box.js').Box>} */
+    this._cullOn = new Set();
+    this._cullQueryScratch = new Set();
+    this._cullCamX = NaN;
+    this._cullCamY = NaN;
+    this._cullCamVs = NaN;
   }
 
   dynamicCount() {
@@ -390,6 +401,7 @@ export class Terrain {
     }
     this.intact.set(nodeKey(box), box);
     if (box.isDynamic) this.dynamicIntact.add(box);
+    this.cullHash.insert(box);
     this.weldToNeighbors(box);
     this.refreshRockEdges(box);
     this.refreshNeighborRockEdges(box);
@@ -445,6 +457,8 @@ export class Terrain {
     const around = this.collectTouching(node);
 
     this.dynamicIntact.delete(node);
+    this.cullHash.remove(node);
+    this._cullOn.delete(node);
     // Snapshot visual before destroy — children inherit tile UV + edge seed/layout.
     const parentVisual = {
       tilePosX: node.tilePosX,
@@ -532,6 +546,8 @@ export class Terrain {
 
     for (const sib of [a, b, c, d]) {
       this.dynamicIntact.delete(sib);
+      this.cullHash.remove(sib);
+      this._cullOn.delete(sib);
       this.intact.delete(nodeKey(sib));
       sib.destroy();
     }
@@ -614,6 +630,11 @@ export class Terrain {
     for (const node of this.intact.values()) node.destroy();
     this.intact.clear();
     this.dynamicIntact.clear();
+    this.cullHash.clear();
+    this._cullOn.clear();
+    this._cullCamX = NaN;
+    this._cullCamY = NaN;
+    this._cullCamVs = NaN;
     for (const piece of this.freeParticles) piece.destroy();
     this.freeParticles.length = 0;
     this.particlePool.destroyAll();
@@ -625,14 +646,80 @@ export class Terrain {
     this.initFromLayout();
   }
 
-  syncGfx(viewBounds = null, activeBounds = null) {
-    for (const node of this.intact.values()) {
-      node.syncGfx(viewBounds, activeBounds);
+  _cullDirty(viewBounds, activeBounds) {
+    if (!viewBounds) return true;
+    const cx = (viewBounds.x0 + viewBounds.x1) * 0.5;
+    const cy = (viewBounds.y0 + viewBounds.y1) * 0.5;
+    const span = viewBounds.x1 - viewBounds.x0;
+    if (
+      !(Math.abs(cx - this._cullCamX) < CULL_DIRTY_PX) ||
+      !(Math.abs(cy - this._cullCamY) < CULL_DIRTY_PX) ||
+      !(Math.abs(span - this._cullCamVs) < 1)
+    ) {
+      this._cullCamX = cx;
+      this._cullCamY = cy;
+      this._cullCamVs = span;
+      return true;
     }
+    return false;
+  }
+
+  syncGfx(viewBounds = null, activeBounds = null) {
+    // Always sync awake dynamics (pose + hash cell).
+    for (const node of this.dynamicIntact) {
+      if (!node.body || !node.body.isAwake()) continue;
+      node.syncTransform();
+      this.cullHash.update(node);
+    }
+
+    const dirty = this._cullDirty(viewBounds, activeBounds);
+    if (dirty) {
+      const next = this._cullQueryScratch;
+      next.clear();
+      if (activeBounds) {
+        this.cullHash.queryInto(activeBounds, next);
+      } else {
+        for (const node of this.intact.values()) next.add(node);
+      }
+      for (const node of next) {
+        node.syncSim(viewBounds, activeBounds);
+      }
+      for (const node of this._cullOn) {
+        if (!next.has(node)) node.forceCullOff();
+      }
+      // Swap sets without allocating.
+      const prev = this._cullOn;
+      this._cullOn = next;
+      this._cullQueryScratch = prev;
+      prev.clear();
+    } else {
+      // Camera steady — only re-cull moving dynamics near edges.
+      for (const node of this.dynamicIntact) {
+        node.syncSim(viewBounds, activeBounds);
+        if (
+          (node.gfx && node.gfx.visible) ||
+          (node.body && node.body.isActive())
+        ) {
+          this._cullOn.add(node);
+        } else {
+          this._cullOn.delete(node);
+        }
+      }
+    }
+
     for (const piece of this.freeParticles) {
       piece.syncGfx(viewBounds);
     }
-    if (this.particleLayer && typeof this.particleLayer.update === "function") {
+    const buckets = this.particleBuckets;
+    if (buckets) {
+      for (let i = 0; i < buckets.length; i++) {
+        const b = buckets[i];
+        if (typeof b.update === "function") b.update();
+      }
+    } else if (
+      this.particleLayer &&
+      typeof this.particleLayer.update === "function"
+    ) {
       this.particleLayer.update();
     }
   }

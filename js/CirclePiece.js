@@ -7,9 +7,9 @@ import {
   Vec2,
   m2px,
   px2m,
-} from './config.js';
-import { GameObject } from './GameObject.js';
-import { Sprite } from './Renderer.js';
+} from "./config.js";
+import { GameObject } from "./GameObject.js";
+import { Particle } from "./Renderer.js";
 
 const PARTICLE_FIXTURE = {
   density: 1.2,
@@ -21,55 +21,58 @@ const PARTICLE_FIXTURE = {
 
 const PARTICLE_DIAM = SHATTER_BALL_RADIUS * 2;
 
-function pickTexture(textures) {
-  if (!textures || !textures.length) return null;
-  return textures[(Math.random() * textures.length) | 0];
-}
-
-/** Fit larger rock art into physics diameter, keep aspect ratio. */
-function applyRockScale(sprite, texture) {
+function rockScale(texture) {
   const tw = texture.width || 1;
   const th = texture.height || 1;
-  const scale = PARTICLE_DIAM / Math.max(tw, th);
-  sprite.width = tw * scale;
-  sprite.height = th * scale;
+  return PARTICLE_DIAM / Math.max(tw, th);
 }
 
+/**
+ * Shatter bolita — Pixi v8 Particle in a per-texture ParticleContainer bucket.
+ * @param {import('pixi.js').ParticleContainer[] | null} buckets
+ * @param {import('pixi.js').Texture[] | null} textures
+ */
 export class CirclePiece extends GameObject {
-  /**
-   * @param {*} world
-   * @param {number} cx
-   * @param {number} cy
-   * @param {import('pixi.js').Container | null} [layer]
-   * @param {import('pixi.js').Texture[] | null} [textures]
-   */
-  constructor(world, cx, cy, layer = null, textures = null) {
+  constructor(world, cx, cy, buckets = null, textures = null) {
     super(
       world,
       {
-        type: 'dynamic',
+        type: "dynamic",
         position: Vec2(px2m(cx), px2m(cy)),
         linearDamping: 0.4,
         angularDamping: 0.6,
       },
-      'particle'
+      "particle",
     );
-    this.layer = layer;
+    this.buckets = buckets;
     this.textures = textures;
     this.bornAt = performance.now();
     this.settleFrames = 0;
     this.pooled = false;
     this.inLayer = false;
+    this.texIndex = 0;
+    this.bucket = null;
+    this._baseScale = 1;
 
     this.createCircleFixture(px2m(SHATTER_BALL_RADIUS), PARTICLE_FIXTURE);
 
-    const texture = pickTexture(textures);
-    if (layer && texture) {
-      this.gfx = new Sprite(texture);
-      this.gfx.anchor.set(0.5);
-      applyRockScale(this.gfx, texture);
-      this.gfx.position.set(cx, cy);
-      layer.addChild(this.gfx);
+    if (buckets && textures && textures.length) {
+      this.texIndex = (Math.random() * textures.length) | 0;
+      this.bucket = buckets[this.texIndex];
+      const texture = textures[this.texIndex];
+      this._baseScale = rockScale(texture);
+      this.gfx = new Particle({
+        texture,
+        x: cx,
+        y: cy,
+        anchorX: 0.5,
+        anchorY: 0.5,
+        scaleX: this._baseScale,
+        scaleY: this._baseScale,
+        rotation: 0,
+        alpha: 1,
+      });
+      this.bucket.addParticle(this.gfx);
       this.inLayer = true;
     }
   }
@@ -80,8 +83,24 @@ export class CirclePiece extends GameObject {
     this.body.applyLinearImpulse(
       Vec2(Math.cos(ang), Math.sin(ang)).mul(px2m(mag)),
       this.body.getPosition(),
-      true
+      true,
     );
+  }
+
+  _bindTexture(texIndex) {
+    if (!this.gfx || !this.buckets || !this.textures) return;
+    const next = this.textures[texIndex];
+    if (!next) return;
+    if (this.texIndex !== texIndex && this.bucket && this.inLayer) {
+      this.bucket.removeParticle(this.gfx);
+      this.inLayer = false;
+    }
+    this.texIndex = texIndex;
+    this.bucket = this.buckets[texIndex];
+    this._baseScale = rockScale(next);
+    this.gfx.texture = next;
+    this.gfx.scaleX = this._baseScale;
+    this.gfx.scaleY = this._baseScale;
   }
 
   reactivate(cx, cy) {
@@ -93,18 +112,14 @@ export class CirclePiece extends GameObject {
     this.body.setLinearVelocity(Vec2(0, 0));
     this.body.setAngularVelocity(0);
     this.body.setAwake(true);
-    if (this.gfx) {
-      const texture = pickTexture(this.textures);
-      if (texture) {
-        this.gfx.texture = texture;
-        applyRockScale(this.gfx, texture);
-      }
-      this.gfx.position.set(cx, cy);
+    if (this.gfx && this.textures && this.textures.length) {
+      this._bindTexture((Math.random() * this.textures.length) | 0);
+      this.gfx.x = cx;
+      this.gfx.y = cy;
       this.gfx.rotation = 0;
       this.gfx.alpha = 1;
-      this.gfx.visible = true;
-      if (this.layer && !this.inLayer) {
-        this.layer.addChild(this.gfx);
+      if (this.bucket && !this.inLayer) {
+        this.bucket.addParticle(this.gfx);
         this.inLayer = true;
       }
     }
@@ -115,23 +130,22 @@ export class CirclePiece extends GameObject {
     this.body.setLinearVelocity(Vec2(0, 0));
     this.body.setAngularVelocity(0);
     this.body.setActive(false);
-    if (this.gfx && this.layer && this.inLayer) {
-      this.layer.removeChild(this.gfx);
+    if (this.gfx && this.bucket && this.inLayer) {
+      this.bucket.removeParticle(this.gfx);
       this.inLayer = false;
     }
   }
 
   destroyGfx() {
     if (!this.gfx) return;
-    if (this.layer && this.inLayer) {
+    if (this.bucket && this.inLayer) {
       try {
-        this.layer.removeChild(this.gfx);
+        this.bucket.removeParticle(this.gfx);
       } catch (_) {
         /* already removed */
       }
       this.inLayer = false;
     }
-    this.gfx.destroy({ texture: false, textureSource: false });
     this.gfx = null;
   }
 
@@ -148,31 +162,32 @@ export class CirclePiece extends GameObject {
     const p = this.body.getPosition();
     const x = m2px(p.x);
     const y = m2px(p.y);
-    this.gfx.position.set(x, y);
+    this.gfx.x = x;
+    this.gfx.y = y;
     this.gfx.rotation = this.body.getAngle();
     if (viewBounds) {
-      const onScreen =
+      const on =
         x >= viewBounds.x0 &&
         x <= viewBounds.x1 &&
         y >= viewBounds.y0 &&
         y <= viewBounds.y1;
-      this.gfx.visible = onScreen;
+      this.gfx.alpha = on ? 1 : 0;
     } else {
-      this.gfx.visible = true;
+      this.gfx.alpha = 1;
     }
   }
 }
 
-/** Reuse CirclePiece bodies + rock sprites instead of create/destroy churn. */
+/** Reuse CirclePiece bodies + particles instead of create/destroy churn. */
 export class ParticlePool {
   /**
    * @param {*} world
-   * @param {import('pixi.js').Container | null} [layer]
+   * @param {import('pixi.js').ParticleContainer[] | null} [buckets]
    * @param {import('pixi.js').Texture[] | null} [textures]
    */
-  constructor(world, layer = null, textures = null) {
+  constructor(world, buckets = null, textures = null) {
     this.world = world;
-    this.layer = layer;
+    this.buckets = buckets;
     this.textures = textures;
     this.free = [];
   }
@@ -183,7 +198,7 @@ export class ParticlePool {
       piece.reactivate(cx, cy);
       return piece;
     }
-    return new CirclePiece(this.world, cx, cy, this.layer, this.textures);
+    return new CirclePiece(this.world, cx, cy, this.buckets, this.textures);
   }
 
   release(piece) {

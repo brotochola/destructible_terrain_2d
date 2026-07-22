@@ -406,18 +406,28 @@ export class Box extends GameObject {
   }
 
   /** World-px AABB of current pose (axis-aligned; ignores rotation). */
-  worldAabb() {
+  worldAabbInto(out) {
     if (this.body) {
       const p = this.body.getPosition();
       const hs = this.size / 2;
-      return { x: m2px(p.x) - hs, y: m2px(p.y) - hs, size: this.size };
+      out.x = m2px(p.x) - hs;
+      out.y = m2px(p.y) - hs;
+      out.size = this.size;
+    } else {
+      out.x = this.x;
+      out.y = this.y;
+      out.size = this.size;
     }
-    return { x: this.x, y: this.y, size: this.size };
+    return out;
   }
 
-  overlapsBounds(bounds) {
+  worldAabb() {
+    return this.worldAabbInto({ x: 0, y: 0, size: 0 });
+  }
+
+  overlapsBounds(bounds, aabb = null) {
     if (!bounds) return true;
-    const a = this.worldAabb();
+    const a = aabb || this.worldAabbInto(_boxAabbScratch);
     return !(
       a.x + a.size < bounds.x0 ||
       a.x > bounds.x1 ||
@@ -432,9 +442,17 @@ export class Box extends GameObject {
    */
   syncGfx(viewBounds = null, activeBounds = null) {
     if (!this.gfx || !this.body) return;
+    this.syncSim(viewBounds, activeBounds);
+    this.syncTransform();
+  }
+
+  /** Visibility + body active only. */
+  syncSim(viewBounds = null, activeBounds = null) {
+    if (!this.gfx || !this.body) return;
+    const a = this.worldAabbInto(_boxAabbScratch);
 
     if (activeBounds) {
-      const want = this.overlapsBounds(activeBounds);
+      const want = this.overlapsBounds(activeBounds, a);
       if (want) {
         if (!this.body.isActive()) {
           this.body.setActive(true);
@@ -446,14 +464,26 @@ export class Box extends GameObject {
     }
 
     if (viewBounds) {
-      this.gfx.visible = this.overlapsBounds(viewBounds);
+      this.gfx.visible = this.overlapsBounds(viewBounds, a);
     } else {
       this.gfx.visible = true;
     }
+  }
 
-    if (!this.isDynamic || !this.body.isAwake()) return;
+  /** Hide + deactivate (left the query set). */
+  forceCullOff() {
+    if (this.gfx) this.gfx.visible = false;
+    if (this.body && this.body.isActive()) this.body.setActive(false);
+  }
+
+  syncTransform() {
+    if (!this.isDynamic || !this.gfx || !this.body) return;
+    if (!this.body.isAwake()) return;
     const p = this.body.getPosition();
     this.gfx.position.set(m2px(p.x), m2px(p.y));
     this.gfx.rotation = this.body.getAngle();
   }
 }
+
+const _boxAabbScratch = { x: 0, y: 0, size: 0 };
+
