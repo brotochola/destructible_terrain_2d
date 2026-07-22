@@ -12,19 +12,14 @@ export function orderSize(n) {
   return P_D * 2 ** n;
 }
 
-/** Palette base; higher orders get darker via colorForOrder. */
-const ORDER_PALETTE = ["#caa26a", "#8a6d43", "#5f5240", "#3d3a33", "#242220"];
-
-export function colorForOrder(n) {
-  const i =
-    ((n % ORDER_PALETTE.length) + ORDER_PALETTE.length) % ORDER_PALETTE.length;
-  return ORDER_PALETTE[i];
-}
-
-/** '#rrggbb' → 0xrrggbb for Pixi. */
-export function hexToNum(hex) {
-  return parseInt(hex.replace("#", ""), 16);
-}
+/** Shared bedrock texture (world-locked tile UVs on each intact box). */
+export const ROCK_TEXTURE_URL = "assets/rocky.jpg";
+/** TilingSprite tileScale — lower = denser stones / more repeats. */
+export const ROCK_TILE_SCALE = 0.25;
+/** Multiply tint on grayscale rock (warm dirt). */
+export const ROCK_TINT = 0xc4a574;
+/** Shatter bolita sprites (scaled down to SHATTER_BALL diameter). */
+export const ROCK_PARTICLE_URLS = ["assets/rock1.png", "assets/rock2.png"];
 
 /**
  * Root boxes in layout-local px (added to originX / terrainTop).
@@ -82,7 +77,7 @@ export const SHATTER_KICK_MIN = 0;
 export const SHATTER_KICK_MAX = 50;
 
 /** Order ≤ this → dynamic body + WeldJoint to neighbors. */
-export const DYNAMIC_MAX_ORDER = 1;
+export const DYNAMIC_MAX_ORDER = 3;
 export const BOX_DENSITY = 1.0;
 export const BOX_FRICTION = 0.9;
 export const BOX_RESTITUTION = 0;

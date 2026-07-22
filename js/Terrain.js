@@ -105,20 +105,21 @@ const NEIGHBOR_DIRS = [
 export class Terrain {
   /**
    * @param {*} world Planck world
-   * @param {{ boxes: import('pixi.js').Container, particles: import('pixi.js').Container }} layers
+   * @param {{ boxes: import('pixi.js').Container, particles: import('pixi.js').Container, particleTextures?: import('pixi.js').Texture[], rockTexture?: import('pixi.js').Texture }} layers
    */
   constructor(world, layers = null) {
     this.world = world;
     this.boxLayer = layers && layers.boxes;
     this.particleLayer = layers && layers.particles;
-    this.particleTexture = layers && layers.particleTexture;
+    this.particleTextures = layers && layers.particleTextures;
+    this.rockTexture = layers && layers.rockTexture;
     this.intact = new Map();
     this.dynamicIntact = new Set();
     this.freeParticles = [];
     this.particlePool = new ParticlePool(
       world,
       this.particleLayer,
-      this.particleTexture
+      this.particleTextures
     );
     this._nextRootId = 0;
     this._coalesceCursor = 0;
@@ -153,7 +154,8 @@ export class Terrain {
       gy,
       rootId,
       this.boxLayer,
-      angle
+      angle,
+      this.rockTexture
     );
     if (velocity && box.isDynamic && box.body) {
       box.body.setLinearVelocity(Vec2(velocity.vx, velocity.vy));

@@ -75,7 +75,8 @@ export class Game {
     this.terrain = new Terrain(this.world, {
       boxes: this.renderer.boxes,
       particles: this.renderer.particles,
-      particleTexture: this.renderer.particleTexture,
+      particleTextures: this.renderer.particleTextures,
+      rockTexture: this.renderer.rockTexture,
     });
 
     this.bindContacts();

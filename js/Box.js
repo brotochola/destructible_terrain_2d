@@ -9,15 +9,15 @@ import {
   CAT_PARTICLE,
   CAT_WALL,
   DYNAMIC_MAX_ORDER,
-  colorForOrder,
-  hexToNum,
+  ROCK_TILE_SCALE,
+  ROCK_TINT,
   m2px,
   orderSize,
   Vec2,
   px2m,
 } from './config.js';
 import { GameObject } from './GameObject.js';
-import { Graphics } from './Renderer.js';
+import { TilingSprite } from './Renderer.js';
 
 const INTACT_MASK = CAT_WALL | CAT_INTACT | CAT_PARTICLE | CAT_CHARACTER;
 
@@ -31,8 +31,20 @@ export class Box extends GameObject {
    * @param {number|string} rootId unique per root mamushka
    * @param {import('pixi.js').Container} [layer]
    * @param {number} [angle] body angle radians
+   * @param {import('pixi.js').Texture | null} [rockTexture]
    */
-  constructor(world, order, x, y, gx, gy, rootId, layer = null, angle = 0) {
+  constructor(
+    world,
+    order,
+    x,
+    y,
+    gx,
+    gy,
+    rootId,
+    layer = null,
+    angle = 0,
+    rockTexture = null
+  ) {
     const size = orderSize(order);
     const isDynamic = order <= DYNAMIC_MAX_ORDER;
     const cx = x + size / 2;
@@ -63,11 +75,17 @@ export class Box extends GameObject {
       filterMaskBits: INTACT_MASK,
     });
 
-    if (layer) {
-      this.gfx = new Graphics()
-        .rect(-size / 2, -size / 2, size, size)
-        .fill(hexToNum(colorForOrder(order)))
-        .stroke({ width: 0.5, color: 0x000000, alpha: 0.35 });
+    if (layer && rockTexture) {
+      this.gfx = new TilingSprite({
+        texture: rockTexture,
+        width: size,
+        height: size,
+      });
+      this.gfx.anchor.set(0.5);
+      this.gfx.tileScale.set(ROCK_TILE_SCALE, ROCK_TILE_SCALE);
+      // World-locked UVs frozen at spawn — do not update in syncGfx.
+      this.gfx.tilePosition.set(-x, -y);
+      this.gfx.tint = ROCK_TINT;
       this.gfx.position.set(cx, cy);
       this.gfx.rotation = angle;
       layer.addChild(this.gfx);

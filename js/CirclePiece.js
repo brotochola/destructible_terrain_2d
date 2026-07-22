@@ -9,7 +9,7 @@ import {
   px2m,
 } from './config.js';
 import { GameObject } from './GameObject.js';
-import { Particle } from './Renderer.js';
+import { Sprite } from './Renderer.js';
 
 const PARTICLE_FIXTURE = {
   density: 1.2,
@@ -19,18 +19,31 @@ const PARTICLE_FIXTURE = {
   filterMaskBits: CAT_WALL | CAT_INTACT | CAT_CHARACTER,
 };
 
-const PARTICLE_COLOR = 0xe0b26a;
 const PARTICLE_DIAM = SHATTER_BALL_RADIUS * 2;
+
+function pickTexture(textures) {
+  if (!textures || !textures.length) return null;
+  return textures[(Math.random() * textures.length) | 0];
+}
+
+/** Fit larger rock art into physics diameter, keep aspect ratio. */
+function applyRockScale(sprite, texture) {
+  const tw = texture.width || 1;
+  const th = texture.height || 1;
+  const scale = PARTICLE_DIAM / Math.max(tw, th);
+  sprite.width = tw * scale;
+  sprite.height = th * scale;
+}
 
 export class CirclePiece extends GameObject {
   /**
    * @param {*} world
    * @param {number} cx
    * @param {number} cy
-   * @param {import('pixi.js').ParticleContainer | null} [layer]
-   * @param {import('pixi.js').Texture | null} [texture]
+   * @param {import('pixi.js').Container | null} [layer]
+   * @param {import('pixi.js').Texture[] | null} [textures]
    */
-  constructor(world, cx, cy, layer = null, texture = null) {
+  constructor(world, cx, cy, layer = null, textures = null) {
     super(
       world,
       {
@@ -42,7 +55,7 @@ export class CirclePiece extends GameObject {
       'particle'
     );
     this.layer = layer;
-    this.texture = texture;
+    this.textures = textures;
     this.bornAt = performance.now();
     this.settleFrames = 0;
     this.pooled = false;
@@ -50,18 +63,13 @@ export class CirclePiece extends GameObject {
 
     this.createCircleFixture(px2m(SHATTER_BALL_RADIUS), PARTICLE_FIXTURE);
 
+    const texture = pickTexture(textures);
     if (layer && texture) {
-      this.gfx = new Particle({
-        texture,
-        x: cx,
-        y: cy,
-        anchorX: 0.5,
-        anchorY: 0.5,
-        width: PARTICLE_DIAM,
-        height: PARTICLE_DIAM,
-        tint: PARTICLE_COLOR,
-      });
-      layer.addParticle(this.gfx);
+      this.gfx = new Sprite(texture);
+      this.gfx.anchor.set(0.5);
+      applyRockScale(this.gfx, texture);
+      this.gfx.position.set(cx, cy);
+      layer.addChild(this.gfx);
       this.inLayer = true;
     }
   }
@@ -86,12 +94,17 @@ export class CirclePiece extends GameObject {
     this.body.setAngularVelocity(0);
     this.body.setAwake(true);
     if (this.gfx) {
-      this.gfx.x = cx;
-      this.gfx.y = cy;
+      const texture = pickTexture(this.textures);
+      if (texture) {
+        this.gfx.texture = texture;
+        applyRockScale(this.gfx, texture);
+      }
+      this.gfx.position.set(cx, cy);
       this.gfx.rotation = 0;
       this.gfx.alpha = 1;
+      this.gfx.visible = true;
       if (this.layer && !this.inLayer) {
-        this.layer.addParticle(this.gfx);
+        this.layer.addChild(this.gfx);
         this.inLayer = true;
       }
     }
@@ -103,22 +116,22 @@ export class CirclePiece extends GameObject {
     this.body.setAngularVelocity(0);
     this.body.setActive(false);
     if (this.gfx && this.layer && this.inLayer) {
-      this.layer.removeParticle(this.gfx);
+      this.layer.removeChild(this.gfx);
       this.inLayer = false;
     }
   }
 
-  /** Particle destroy: drop from ParticleContainer, don't call DisplayObject.destroy. */
   destroyGfx() {
     if (!this.gfx) return;
     if (this.layer && this.inLayer) {
       try {
-        this.layer.removeParticle(this.gfx);
+        this.layer.removeChild(this.gfx);
       } catch (_) {
         /* already removed */
       }
       this.inLayer = false;
     }
+    this.gfx.destroy({ texture: false, textureSource: false });
     this.gfx = null;
   }
 
@@ -135,8 +148,7 @@ export class CirclePiece extends GameObject {
     const p = this.body.getPosition();
     const x = m2px(p.x);
     const y = m2px(p.y);
-    this.gfx.x = x;
-    this.gfx.y = y;
+    this.gfx.position.set(x, y);
     this.gfx.rotation = this.body.getAngle();
     if (viewBounds) {
       const onScreen =
@@ -144,19 +156,24 @@ export class CirclePiece extends GameObject {
         x <= viewBounds.x1 &&
         y >= viewBounds.y0 &&
         y <= viewBounds.y1;
-      this.gfx.alpha = onScreen ? 1 : 0;
+      this.gfx.visible = onScreen;
     } else {
-      this.gfx.alpha = 1;
+      this.gfx.visible = true;
     }
   }
 }
 
-/** Reuse CirclePiece bodies + Particle gfx instead of create/destroy churn. */
+/** Reuse CirclePiece bodies + rock sprites instead of create/destroy churn. */
 export class ParticlePool {
-  constructor(world, layer = null, texture = null) {
+  /**
+   * @param {*} world
+   * @param {import('pixi.js').Container | null} [layer]
+   * @param {import('pixi.js').Texture[] | null} [textures]
+   */
+  constructor(world, layer = null, textures = null) {
     this.world = world;
     this.layer = layer;
-    this.texture = texture;
+    this.textures = textures;
     this.free = [];
   }
 
@@ -166,7 +183,7 @@ export class ParticlePool {
       piece.reactivate(cx, cy);
       return piece;
     }
-    return new CirclePiece(this.world, cx, cy, this.layer, this.texture);
+    return new CirclePiece(this.world, cx, cy, this.layer, this.textures);
   }
 
   release(piece) {
