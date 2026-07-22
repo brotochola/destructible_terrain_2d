@@ -23,9 +23,9 @@ import {
   orderSize,
   Vec2,
   px2m,
-} from './config.js';
-import { GameObject } from './GameObject.js';
-import { Container, Graphics, TilingSprite } from './Renderer.js';
+} from "./config.js";
+import { GameObject } from "./GameObject.js";
+import { Container, Graphics, TilingSprite } from "./Renderer.js";
 
 const INTACT_MASK = CAT_WALL | CAT_INTACT | CAT_PARTICLE | CAT_CHARACTER;
 
@@ -79,7 +79,12 @@ function valueNoise2(seed, layoutX, layoutY, step) {
 function edgeInset(edgeSeed, layoutX, layoutY, axisSalt = 0) {
   const seed = (edgeSeed ^ Math.imul(axisSalt, 0x9e3779b9)) | 0;
   const n1 = valueNoise2(seed, layoutX, layoutY, ROCK_EDGE_STEP);
-  const n2 = valueNoise2(seed ^ 0x85ebca6b, layoutX, layoutY, ROCK_EDGE_STEP / 3);
+  const n2 = valueNoise2(
+    seed ^ 0x85ebca6b,
+    layoutX,
+    layoutY,
+    ROCK_EDGE_STEP / 3,
+  );
   return (
     ROCK_EDGE_AMP * (0.25 + 0.75 * n1) + ROCK_EDGE_AMP2 * (0.25 + 0.75 * n2)
   );
@@ -121,10 +126,10 @@ function inGaps(along, gaps, eps = 0.5) {
 
 function edgeDefs(half) {
   return [
-    { key: 'top', x0: -half, y0: -half, x1: half, y1: -half, ix: 0, iy: 1 },
-    { key: 'right', x0: half, y0: -half, x1: half, y1: half, ix: -1, iy: 0 },
-    { key: 'bottom', x0: half, y0: half, x1: -half, y1: half, ix: 0, iy: -1 },
-    { key: 'left', x0: -half, y0: half, x1: -half, y1: -half, ix: 1, iy: 0 },
+    { key: "top", x0: -half, y0: -half, x1: half, y1: -half, ix: 0, iy: 1 },
+    { key: "right", x0: half, y0: -half, x1: half, y1: half, ix: -1, iy: 0 },
+    { key: "bottom", x0: half, y0: half, x1: -half, y1: half, ix: 0, iy: -1 },
+    { key: "left", x0: -half, y0: half, x1: -half, y1: -half, ix: 1, iy: 0 },
   ];
 }
 
@@ -162,7 +167,17 @@ function buildRockOutline(size, faceGaps, edgeSeed, layoutX, layoutY) {
 }
 
 /** Stroke one uncovered gap; t0/t1 in edge param space. */
-function sampleEdgeSpan(e, t0, t1, segs, edgeSeed, layoutX, layoutY, half, size) {
+function sampleEdgeSpan(
+  e,
+  t0,
+  t1,
+  segs,
+  edgeSeed,
+  layoutX,
+  layoutY,
+  half,
+  size,
+) {
   const out = [];
   const salt = axisSaltForEdge(e);
   const outset = ROCK_EDGE_STROKE_OUTSET;
@@ -176,7 +191,7 @@ function sampleEdgeSpan(e, t0, t1, segs, edgeSeed, layoutX, layoutY, half, size)
       edgeSeed,
       layoutX + x + half,
       layoutY + y + half,
-      salt
+      salt,
     );
     const along = inset - outset;
     x += e.ix * along;
@@ -210,14 +225,14 @@ export class Box extends GameObject {
     layer = null,
     angle = 0,
     rockTexture = null,
-    visual = null
+    visual = null,
   ) {
     const size = orderSize(order);
     const isDynamic = order <= DYNAMIC_MAX_ORDER;
     const cx = x + size / 2;
     const cy = y + size / 2;
     const bodyDef = {
-      type: isDynamic ? 'dynamic' : 'static',
+      type: isDynamic ? "dynamic" : "static",
       position: Vec2(px2m(cx), px2m(cy)),
       angle,
     };
@@ -225,7 +240,7 @@ export class Box extends GameObject {
       bodyDef.linearDamping = BOX_LINEAR_DAMPING;
       bodyDef.angularDamping = BOX_ANGULAR_DAMPING;
     }
-    super(world, bodyDef, 'intact');
+    super(world, bodyDef, "intact");
     this.order = order;
     this.gx = gx;
     this.gy = gy;
@@ -275,7 +290,7 @@ export class Box extends GameObject {
 
       this.edgeMask = new Graphics();
       this.edgeStroke = new Graphics();
-      this.edgeStroke.eventMode = 'none';
+      this.edgeStroke.eventMode = "none";
 
       this.gfx.addChild(this.fill, this.edgeMask, this.edgeStroke);
       this.fill.mask = this.edgeMask;
@@ -329,7 +344,7 @@ export class Box extends GameObject {
       gaps,
       this.edgeSeed,
       this.layoutX,
-      this.layoutY
+      this.layoutY,
     );
     if (pts.length < 6) return;
 
@@ -344,7 +359,7 @@ export class Box extends GameObject {
     stroke.clear();
     const sw = Math.min(
       this.size * ROCK_EDGE_STROKE_WIDTH_FRAC,
-      ROCK_EDGE_STROKE_WIDTH_MAX
+      ROCK_EDGE_STROKE_WIDTH_MAX,
     );
     const half = this.size / 2;
     const segs = edgeSegCount(this.size);
@@ -352,8 +367,8 @@ export class Box extends GameObject {
       width: Math.max(0.75, sw),
       color: ROCK_EDGE_STROKE,
       alpha: 0.85,
-      join: 'round',
-      cap: 'round',
+      join: "round",
+      cap: "round",
     };
 
     for (const e of edgeDefs(half)) {
@@ -380,7 +395,7 @@ export class Box extends GameObject {
           this.layoutX,
           this.layoutY,
           half,
-          this.size
+          this.size,
         );
         if (ep.length < 4) continue;
         stroke.moveTo(ep[0], ep[1]);

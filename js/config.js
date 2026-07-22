@@ -31,7 +31,7 @@ export const ROCK_EDGE_STEP = 6;
 export const ROCK_EDGE_SAMPLES_PER_STEP = 3;
 /** Push stroke slightly into the void so ceilings/floors both read. */
 export const ROCK_EDGE_STROKE_OUTSET = 0.45;
-export const ROCK_EDGE_STROKE = 0x2a2118;
+export const ROCK_EDGE_STROKE = 0x2e1702;
 export const ROCK_EDGE_STROKE_WIDTH_FRAC = 0.02;
 export const ROCK_EDGE_STROKE_WIDTH_MAX = 2;
 
