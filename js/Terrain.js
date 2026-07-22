@@ -117,6 +117,24 @@ function aabbOf(box) {
   return { x: box.x, y: box.y, size: box.size };
 }
 
+/** True if Planck bodies share any joint. */
+function bodiesWelded(bodyA, bodyB) {
+  if (!bodyA || !bodyB) return false;
+  for (let edge = bodyA.getJointList(); edge; edge = edge.next) {
+    if (edge.other === bodyB) return true;
+  }
+  return false;
+}
+
+/**
+ * Seal face only while bond holds.
+ * Static–static: grid adjacency (no welds). Any dynamic: need live joint.
+ */
+function shouldSealNeighbor(a, b) {
+  if (!a.isDynamic && !b.isDynamic) return true;
+  return bodiesWelded(a.body, b.body);
+}
+
 /** True if AABB overlaps circle (closest point on box to center within radius). */
 function aabbOverlapsCircle(box, cx, cy, rSq) {
   const a = aabbOf(box);
@@ -323,8 +341,20 @@ export class Terrain {
         broken.push(joint);
       }
     }
+    if (!broken.length) return;
+
+    const refresh = new Set();
     for (let i = 0; i < broken.length; i++) {
-      this.world.destroyJoint(broken[i]);
+      const joint = broken[i];
+      for (const body of [joint.getBodyA(), joint.getBodyB()]) {
+        const ud = body && body.getUserData();
+        const box = ud && ud.gameObject;
+        if (box && box.applyRockSilhouette) refresh.add(box);
+      }
+      this.world.destroyJoint(joint);
+    }
+    for (const box of refresh) {
+      if (this.intact.has(nodeKey(box))) this.refreshRockEdges(box);
     }
   }
 
@@ -376,7 +406,8 @@ export class Terrain {
    * Uncovered intervals on a face → stroke/chew there.
    * Empty = neighbor covers this side (seal, no stroke).
    * Rule: covering intact neighbor? seal (or subtract their span). Else draw.
-   * Different material → uncovered (jag like void). Welds ignored.
+   * Different material → uncovered (jag like void).
+   * Dynamic pairs only seal while a weld still exists.
    */
   getFaceGaps(box, dx, dy) {
     const target = edgeAlongInterval(box, dx, dy);
@@ -393,6 +424,7 @@ export class Terrain {
       dy,
     )) {
       if (n.materialId !== box.materialId) continue;
+      if (!shouldSealNeighbor(box, n)) continue;
       // Equal or larger neighbor occupies the whole adjacent cell → full seal.
       if (n.order >= box.order) return [];
       covered.push(edgeAlongInterval(n, dx, dy));
@@ -404,6 +436,7 @@ export class Terrain {
     for (const other of cross) {
       if (other.materialId !== box.materialId) continue;
       if (!sharesCardinalFace(A, aabbOf(other), dx, dy, eps)) continue;
+      if (!shouldSealNeighbor(box, other)) continue;
       if (other.order >= box.order) return [];
       covered.push(edgeAlongInterval(other, dx, dy));
     }
