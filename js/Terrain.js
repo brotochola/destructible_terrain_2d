@@ -123,6 +123,30 @@ function boxesTouch(a, b, eps) {
   );
 }
 
+/**
+ * True if B sits flush on A's cardinal face (dx,dy) with tangential overlap.
+ * Stricter than "somewhere on that side" — corner grazers don't fake-seal.
+ */
+function sharesCardinalFace(A, B, dx, dy, eps) {
+  if (dx === 1) {
+    if (Math.abs(B.x - (A.x + A.size)) > eps) return false;
+    return !(B.y + B.size < A.y + eps || A.y + A.size < B.y + eps);
+  }
+  if (dx === -1) {
+    if (Math.abs(B.x + B.size - A.x) > eps) return false;
+    return !(B.y + B.size < A.y + eps || A.y + A.size < B.y + eps);
+  }
+  if (dy === 1) {
+    if (Math.abs(B.y - (A.y + A.size)) > eps) return false;
+    return !(B.x + B.size < A.x + eps || A.x + A.size < B.x + eps);
+  }
+  if (dy === -1) {
+    if (Math.abs(B.y + B.size - A.y) > eps) return false;
+    return !(B.x + B.size < A.x + eps || A.x + A.size < B.x + eps);
+  }
+  return false;
+}
+
 /** Interval along shared face (layout px). Horizontal faces → X; vertical → Y. */
 function edgeAlongInterval(box, dx, dy) {
   if (dx !== 0) {
@@ -297,16 +321,17 @@ export class Terrain {
   }
 
   /**
-   * Uncovered layout intervals on a face. Empty = fully sealed (flush, no stroke).
-   * Partial dig → only the hole segments jag/stroke.
+   * Uncovered intervals on a face → stroke/chew there.
+   * Empty = neighbor covers this side (seal, no stroke).
+   * Rule: covering intact neighbor? seal (or subtract their span). Else draw.
+   * Welds ignored — silhouette follows grid/touch occupancy only.
    */
   getFaceGaps(box, dx, dy) {
     const target = edgeAlongInterval(box, dx, dy);
     const eps = BOX_TOUCH_EPS_PX;
     const covered = [];
-    let sealed = false;
 
-    const neighbors = faceNeighbors(
+    for (const n of faceNeighbors(
       this.intact,
       box.rootId,
       box.order,
@@ -314,31 +339,20 @@ export class Terrain {
       box.gy,
       dx,
       dy,
-    );
-    for (const n of neighbors) {
+    )) {
+      // Equal or larger neighbor occupies the whole adjacent cell → full seal.
       if (n.order >= box.order) return [];
       covered.push(edgeAlongInterval(n, dx, dy));
     }
 
     const A = aabbOf(box);
-    // Snapshot first — getFaceGaps may run while another touch query is live.
     const cross = [];
     this.forCrossRootTouching(box, (other) => cross.push(other));
     for (const other of cross) {
-      const B = aabbOf(other);
-      let onFace = false;
-      if (dx === 1 && B.x + eps >= A.x + A.size) onFace = true;
-      if (dx === -1 && B.x + B.size <= A.x + eps) onFace = true;
-      if (dy === 1 && B.y + eps >= A.y + A.size) onFace = true;
-      if (dy === -1 && B.y + B.size <= A.y + eps) onFace = true;
-      if (!onFace) continue;
-      if (other.order >= box.order) {
-        sealed = true;
-        break;
-      }
+      if (!sharesCardinalFace(A, aabbOf(other), dx, dy, eps)) continue;
+      if (other.order >= box.order) return [];
       covered.push(edgeAlongInterval(other, dx, dy));
     }
-    if (sealed) return [];
 
     return uncoveredGaps(target.a0, target.a1, covered, eps);
   }
@@ -409,6 +423,7 @@ export class Terrain {
    * @param {number} [angle]
    * @param {{ vx: number, vy: number, omega: number } | null} [velocity]
    * @param {{ tilePosX?: number, tilePosY?: number, layoutX?: number, layoutY?: number, edgeSeed?: number } | null} [visual]
+   * @param {{ deferEdges?: boolean }} [opts] skip silhouette until caller refreshes (multi-spawn)
    */
   createNode(
     order,
@@ -420,6 +435,7 @@ export class Terrain {
     angle = 0,
     velocity = null,
     visual = null,
+    opts = null,
   ) {
     if (this.boxLayer && !this.rockTexture) {
       throw new Error("rock texture missing for intact boxes");
@@ -445,8 +461,10 @@ export class Terrain {
     if (box.isDynamic) this.dynamicIntact.add(box);
     this.cullHash.insert(box);
     this.weldToNeighbors(box);
-    this.refreshRockEdges(box);
-    this.refreshNeighborRockEdges(box);
+    if (!(opts && opts.deferEdges)) {
+      this.refreshRockEdges(box);
+      this.refreshNeighborRockEdges(box);
+    }
     return box;
   }
 
@@ -538,6 +556,7 @@ export class Terrain {
       vy: pose.vy,
       omega: pose.omega,
     };
+    const kids = [];
     for (let dx = 0; dx < 2; dx++) {
       for (let dy = 0; dy < 2; dy++) {
         const place = childPlacement(pose, parentSize, dx, dy);
@@ -548,19 +567,24 @@ export class Terrain {
           layoutY: parentVisual.layoutY + dy * childSize,
           edgeSeed: parentVisual.edgeSeed,
         };
-        this.createNode(
-          childOrder,
-          place.x,
-          place.y,
-          parentGx * 2 + dx,
-          parentGy * 2 + dy,
-          rootId,
-          pose.angle,
-          velocity,
-          visual,
+        kids.push(
+          this.createNode(
+            childOrder,
+            place.x,
+            place.y,
+            parentGx * 2 + dx,
+            parentGy * 2 + dy,
+            rootId,
+            pose.angle,
+            velocity,
+            visual,
+            { deferEdges: true },
+          ),
         );
       }
     }
+    // All siblings exist + welded — bake silhouettes once (no stale full-perimeter cache).
+    for (const kid of kids) this.refreshRockEdges(kid);
     for (const n of around) {
       if (this.intact.has(nodeKey(n))) this.refreshRockEdges(n);
     }

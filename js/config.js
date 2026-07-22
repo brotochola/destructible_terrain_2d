@@ -39,15 +39,20 @@ export const ROCK_EDGE_STEP = 6;
 /** Vertices per noise cell along an edge (denser = rounder polyline). */
 export const ROCK_EDGE_SAMPLES_PER_STEP = 3;
 /** Push stroke slightly into the void so ceilings/floors both read. */
-export const ROCK_EDGE_STROKE_OUTSET = 0.45;
-export const ROCK_EDGE_STROKE = 0x2a2118;
-export const ROCK_EDGE_STROKE_WIDTH_FRAC = 0.02;
+export const ROCK_EDGE_STROKE_OUTSET = 2;
+export const ROCK_EDGE_STROKE = 0xffffff;
+export const ROCK_EDGE_STROKE_WIDTH_FRAC = 2;
 export const ROCK_EDGE_STROKE_WIDTH_MAX = 2;
 /**
  * Cap cacheAsTexture side (px). Large roots bake soft; shatter → sharper kids.
  * ponytail: ceiling 512² VRAM/box; raise if zoom-in on big chunks looks soft.
  */
 export const ROCK_CACHE_MAX_PX = 512;
+/**
+ * Outset sealed faces so fill overlaps neighbor (hides solver micro-gaps).
+ * Exposed faces still chew inward; physics stay AABB.
+ */
+export const ROCK_FILL_OVERLAP_PX = 1.5;
 
 /** Procedural map size (layout px). */
 export const MAP_W = 4000;

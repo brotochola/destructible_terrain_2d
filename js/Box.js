@@ -19,6 +19,7 @@ import {
   ROCK_EDGE_STROKE_OUTSET,
   ROCK_EDGE_STROKE_WIDTH_FRAC,
   ROCK_EDGE_STROKE_WIDTH_MAX,
+  ROCK_FILL_OVERLAP_PX,
   ROCK_TILE_SCALE,
   ROCK_TINT,
   m2px,
@@ -122,10 +123,12 @@ function edgeDefs(half) {
 
 /**
  * Local-space soft outline. Jag only on uncovered face gaps (flush elsewhere).
+ * Sealed edges outset by ROCK_FILL_OVERLAP_PX so fill tucks under neighbor.
  */
 function buildRockOutline(size, faceGaps, edgeSeed, layoutX, layoutY) {
   const half = size / 2;
   const segs = edgeSegCount(size);
+  const overlap = ROCK_FILL_OVERLAP_PX;
   const pts = [];
 
   for (const e of edgeDefs(half)) {
@@ -145,7 +148,14 @@ function buildRockOutline(size, faceGaps, edgeSeed, layoutX, layoutY) {
           const inset = edgeInset(edgeSeed, lx, ly, salt);
           x += e.ix * inset;
           y += e.iy * inset;
+        } else if (overlap > 0) {
+          // Covered span on a mostly-open face — still overlap neighbor.
+          x -= e.ix * overlap;
+          y -= e.iy * overlap;
         }
+      } else if (overlap > 0) {
+        x -= e.ix * overlap;
+        y -= e.iy * overlap;
       }
       pts.push(x, y);
     }
@@ -242,6 +252,7 @@ export class Box extends GameObject {
       visual && visual.edgeSeed != null ? visual.edgeSeed : ROCK_EDGE_SEED;
 
     this.fill = null;
+    this.fillLayer = null;
     this.edgeMask = null;
     this.edgeStroke = null;
     this._cached = false;
@@ -266,13 +277,11 @@ export class Box extends GameObject {
       this.edgeStroke.eventMode = "none";
       this.edgeMask.eventMode = "none";
 
-      // Fill+mask in own layer so mask stencil applies without covering stroke.
-      // Do NOT set mask.renderable=false — Pixi skips color when used as .mask,
-      // but renderable=false also skips stencil → invisible fill (stroke-only bug).
-      const fillLayer = new Container();
-      fillLayer.addChild(this.fill, this.edgeMask);
+      // Fill+mask cached; stroke stays live so outset lines aren't crop-clipped.
+      this.fillLayer = new Container();
+      this.fillLayer.addChild(this.fill, this.edgeMask);
       this.fill.mask = this.edgeMask;
-      this.gfx.addChild(fillLayer, this.edgeStroke);
+      this.gfx.addChild(this.fillLayer, this.edgeStroke);
       layer.addChild(this.gfx);
     }
 
@@ -308,19 +317,18 @@ export class Box extends GameObject {
     };
   }
 
-  /** Flatten fill+mask+stroke → one quad (rebuild only on silhouette change). */
+  /** Cache fill+mask only. Stroke is a live sibling (never baked) so void outset stays visible. */
   _bakeVisual() {
-    if (!this.gfx) return;
-    // Mask must stay renderable during bake or stencil is empty → invisible fill.
+    if (!this.fillLayer) return;
     const opts = {
       resolution: cacheResolution(this.size),
       antialias: false,
     };
-    if (this._cached && typeof this.gfx.updateCacheTexture === "function") {
-      this.gfx.updateCacheTexture();
-      return;
+    if (this._cached) {
+      this.fillLayer.cacheAsTexture(false);
+      this._cached = false;
     }
-    this.gfx.cacheAsTexture(opts);
+    this.fillLayer.cacheAsTexture(opts);
     this._cached = true;
   }
 
@@ -380,7 +388,7 @@ export class Box extends GameObject {
         }
         t0 = Math.max(0, Math.min(1, t0));
         t1 = Math.max(0, Math.min(1, t1));
-        if (t1 - t0 < 0.02) continue;
+        if (t1 - t0 < 1e-4) continue;
         const ep = sampleEdgeSpan(
           e,
           t0,
