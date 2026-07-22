@@ -11,8 +11,7 @@ import {
 } from 'https://cdn.jsdelivr.net/npm/pixi.js@8.19.0/dist/pixi.min.mjs';
 import {
   H,
-  MAX_PACK_ORDER,
-  ROCK_BOX_URL,
+  ROCK_MUSH_BAKE_MAX_ORDER,
   ROCK_MUSH_SEED,
   ROCK_PARTICLE_URLS,
   W,
@@ -68,9 +67,8 @@ export class Renderer {
     this.particleTextures = await Promise.all(
       ROCK_PARTICLE_URLS.map((url) => Assets.load(url))
     );
-    const boxTexture = await Assets.load(ROCK_BOX_URL);
-    const baked = bakeRockMushTextures(boxTexture, {
-      maxOrder: MAX_PACK_ORDER,
+    const baked = bakeRockMushTextures(this.particleTextures, {
+      maxOrder: ROCK_MUSH_BAKE_MAX_ORDER,
       seed: ROCK_MUSH_SEED,
     });
     this.rockTexturesByOrder = baked.byOrder;

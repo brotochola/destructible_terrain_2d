@@ -4,6 +4,7 @@ import {
   CAT_PARTICLE,
   CAT_WALL,
   particleTunables,
+  ROCK_PARTICLE_VISUAL,
   SHATTER_BALL_RADIUS,
   Vec2,
   m2px,
@@ -26,12 +27,10 @@ const PARTICLE_FIXTURE = {
   filterMaskBits: PARTICLE_BASE_MASK,
 };
 
-const PARTICLE_DIAM = SHATTER_BALL_RADIUS * 2;
-
 function rockScale(texture) {
   const tw = texture.width || 1;
   const th = texture.height || 1;
-  return (PARTICLE_DIAM * 1.3) / Math.max(tw, th);
+  return ROCK_PARTICLE_VISUAL / Math.max(tw, th);
 }
 
 /**

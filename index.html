@@ -32,8 +32,16 @@
     <label>Settle frames <input type="number" id="settle-frames" min="0" max="600" step="10" value="90" title="0 = never settle-cull"></label>
     <label>Max age ms <input type="number" id="particle-age" min="0" max="120000" step="1000" value="12000" title="0 = never age-cull"></label>
   </div>
+  <label class="dbg"><input type="checkbox" id="mush-preview"> Mush bake preview</label>
   <button id="reset">Reset</button>
 </div>
+<aside id="mush-preview-panel" hidden>
+  <div class="mush-preview-head">
+    <b>Mush bake</b>
+    <label>Order <select id="mush-order"></select></label>
+  </div>
+  <div id="mush-gallery" class="mush-gallery"></div>
+</aside>
 <div id="zoomctl">
   <button id="zoomin">+</button>
   <button id="zoomout">−</button>

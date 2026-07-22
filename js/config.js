@@ -4,9 +4,9 @@ export const W = window.innerWidth;
 export const H = window.innerHeight;
 export const ZOOM = 4;
 export const PTM = 10;
-/** Leaf scale; order-1 collider = P_D*2 = 40 (matches box.png). */
+/** Leaf scale; order-1 collider = P_D*2 = 40. */
 export const P_D = 20;
-
+export const SHATTER_BALL_RADIUS = P_D / 4;
 export const px2m = (px) => px / PTM;
 export const m2px = (m) => m * PTM;
 
@@ -17,40 +17,47 @@ export function orderSize(n) {
 
 /** Shatter bolita sprites (scaled down to SHATTER_BALL diameter). */
 export const ROCK_PARTICLE_URLS = ["assets/rock1.png", "assets/rock2.png"];
-/** Hierarchical terrain base (51×53, centered on order-1 40×40). */
-export const ROCK_BOX_URL = "assets/box.png";
-export const ROCK_BOX_W = 51;
-export const ROCK_BOX_H = 53;
-/** Cap bake canvas px (large orders Sprite-scale up). */
-export const ROCK_MUSH_MAX_TEX = 1024;
-/** Floor bake canvas px so small orders keep pebble detail when zoomed. */
-export const ROCK_MUSH_MIN_TEX = 64;
-/** Distinct mushes per order ≥2; pick via rootId+gx+gy hash. */
-export const ROCK_MUSH_VARIANTS = 8;
-export const ROCK_MUSH_SEED = 42;
-/** Order-1 rot variants (0/90/180/270). */
-export const ROCK_BOX_ROT_VARIANTS = 4;
+/** Shatter ball radius in px. */
 
 /**
- * World-px past each collider edge — sprite = box + 2*this.
- * Fixed from box.png vs order-1 so neighbor mushes cover seams at every order.
+ * On-screen rock sprite max side (CirclePiece + order-1 mush stamps).
+ * Collider diam * 1.3 overhang.
  */
-export const ROCK_BOX_OVERFLOW =
-  (Math.max(ROCK_BOX_W, ROCK_BOX_H) - orderSize(1)) / 2;
+export const ROCK_PARTICLE_VISUAL = SHATTER_BALL_RADIUS * 2 * 1.3;
+/**
+ * Order-1 world visual side (px) — sprite size in game, independent of bake res.
+ * Overflow / ratio stay tied to this so doubling bake tex does not enlarge sprites.
+ */
+export const ROCK_MUSH_WORLD_VISUAL = 64;
+/** Order-1 bake tex side (px). Higher orders = this * 2^(n-1). */
+export const ROCK_MUSH_MIN_TEX = 128;
+/** Highest order with its own baked atlas (128→2048). */
+export const ROCK_MUSH_BAKE_MAX_ORDER = 5;
+export const ROCK_MUSH_SEED = 42;
+/** Stamp density for order-1 cluster bake. */
+export const ROCK_MUSH_DENSITY = 1;
+
+/** Texture side for baked order n (1..BAKE_MAX): 128, 256, … 2048. */
+export function orderTexSize(n) {
+  return ROCK_MUSH_MIN_TEX * 2 ** (n - 1);
+}
+
+/** Visual / collider scale (world visual / order-1 collider). */
+export const ROCK_MUSH_VISUAL_RATIO = 1.2; //ROCK_MUSH_WORLD_VISUAL / orderSize(1);
 
 /** Visual overflow (world px) for a collider of `boxSize`. */
-export function rockMushOverflow(_boxSize) {
-  return ROCK_BOX_OVERFLOW;
+export function rockMushOverflow(boxSize) {
+  return (boxSize * (ROCK_MUSH_VISUAL_RATIO - 1)) / 2;
 }
 
 /** Visual sprite side for a collider of `boxSize` (world px). */
 export function rockMushVisualSize(boxSize) {
-  return boxSize + 2 * rockMushOverflow(boxSize);
+  return boxSize * ROCK_MUSH_VISUAL_RATIO;
 }
 
 /** Procedural map size (layout px). */
-export const MAP_W = 3000;
-export const MAP_H = 1000;
+export const MAP_W = 4000;
+export const MAP_H = 1200;
 export const MAP_SEED = 919191;
 /** Noise frequency in order-1 cell units (lower = bigger caves). */
 export const NOISE_SCALE = 0.06;
@@ -121,11 +128,9 @@ export const LASER_COOLDOWN_MS = 1;
 
 /** Balls spawned when an order-1 box shatters. */
 export const SHATTER_BALL_COUNT = 9;
-/** Shatter ball radius in px (diameter defaults to leaf size P_D). */
-export const SHATTER_BALL_RADIUS = P_D / 4;
 /** Impulse magnitude range (px-equivalent) applied to each shatter ball. */
-export const SHATTER_KICK_MIN = 0;
-export const SHATTER_KICK_MAX = 50;
+export const SHATTER_KICK_MIN = 20;
+export const SHATTER_KICK_MAX = 80;
 
 /** Order ≤ this → dynamic body + WeldJoint to neighbors. */
 export const DYNAMIC_MAX_ORDER = 2;

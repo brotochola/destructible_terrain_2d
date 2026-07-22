@@ -18,7 +18,7 @@ import {
 import { Box } from "./Box.js";
 import { CirclePiece, ParticlePool } from "./CirclePiece.js";
 import { SpatialHash } from "./SpatialHash.js";
-import { pickMush, resolveMushHint } from "./rockMush.js";
+import { pickMush, resolveMushHint, synthesizeRecipe } from "./rockMush.js";
 
 function nodeKey(box) {
   return box.rootId + "_" + box.order + "_" + box.gx + "_" + box.gy;
@@ -378,15 +378,13 @@ export class Terrain {
     const parentRecipes =
       this.rockMushRecipes && this.rockMushRecipes[parentOrder];
     const parentRecipe =
-      parentRecipes && parentRecipes[parentMushVariant];
+      (parentRecipes && parentRecipes[parentMushVariant]) ||
+      synthesizeRecipe(rootId, parentOrder, parentGx, parentGy);
     // One subdivision level per laser hit (no recurse to leaf).
     for (let dx = 0; dx < 2; dx++) {
       for (let dy = 0; dy < 2; dy++) {
         const place = childPlacement(pose, parentSize, dx, dy);
-        const mushHint =
-          parentRecipe && parentRecipe[dy * 2 + dx]
-            ? parentRecipe[dy * 2 + dx]
-            : null;
+        const mushHint = parentRecipe[dy * 2 + dx] || null;
         this.createNode(
           childOrder,
           place.x,
