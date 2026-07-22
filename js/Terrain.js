@@ -1,4 +1,5 @@
 import {
+  BOMB_MIN_DIST_PX,
   BOX_TOUCH_EPS_PX,
   CULL_CELL_PX,
   CULL_DIRTY_PX,
@@ -11,6 +12,8 @@ import {
   SHATTER_KICK_MAX,
   SHATTER_KICK_MIN,
   Vec2,
+  WELD_FORCE_PER_STRENGTH,
+  WELD_TORQUE_PER_STRENGTH,
   m2px,
   originX,
   pl,
@@ -114,6 +117,16 @@ function aabbOf(box) {
   return { x: box.x, y: box.y, size: box.size };
 }
 
+/** True if AABB overlaps circle (closest point on box to center within radius). */
+function aabbOverlapsCircle(box, cx, cy, rSq) {
+  const a = aabbOf(box);
+  const qx = Math.max(a.x, Math.min(cx, a.x + a.size));
+  const qy = Math.max(a.y, Math.min(cy, a.y + a.size));
+  const dx = qx - cx;
+  const dy = qy - cy;
+  return dx * dx + dy * dy <= rSq;
+}
+
 function boxesTouch(a, b, eps) {
   const A = aabbOf(a);
   const B = aabbOf(b);
@@ -193,6 +206,11 @@ function weldBoxes(world, a, b) {
   const y0 = Math.max(A.y, B.y);
   const x1 = Math.min(A.x + A.size, B.x + B.size);
   const y1 = Math.min(A.y + A.size, B.y + B.size);
+  const contactLenM = px2m(Math.max(x1 - x0, y1 - y0, 0));
+  const mat = MATERIALS[a.materialId] || MATERIALS[MAT_DIRT];
+  const strength = mat.strength != null ? mat.strength : 1;
+  const maxForce = strength * contactLenM * WELD_FORCE_PER_STRENGTH;
+  const maxTorque = strength * contactLenM * WELD_TORQUE_PER_STRENGTH;
   const worldPt = Vec2(px2m((x0 + x1) / 2), px2m((y0 + y1) / 2));
   world.createJoint(
     pl.WeldJoint({
@@ -203,6 +221,7 @@ function weldBoxes(world, a, b) {
       referenceAngle: b.body.getAngle() - a.body.getAngle(),
       frequencyHz: 0, // hard angular constraint
       dampingRatio: 0,
+      userData: { breakable: true, maxForce, maxTorque },
     }),
   );
 }
@@ -274,10 +293,39 @@ export class Terrain {
     this._cullCamX = NaN;
     this._cullCamY = NaN;
     this._cullCamVs = NaN;
+    /** @type {any[]} */
+    this._brokenWelds = [];
   }
 
   dynamicCount() {
     return this.dynamicIntact.size + this.freeParticles.length;
+  }
+
+  /**
+   * Snap welds whose reaction force/torque exceeds material strength.
+   * Call after world.step (never mid-step).
+   * @param {number} dt
+   */
+  cullBrokenWelds(dt) {
+    if (!(dt > 0)) return;
+    const invDt = 1 / dt;
+    const broken = this._brokenWelds;
+    broken.length = 0;
+    for (let joint = this.world.getJointList(); joint; joint = joint.getNext()) {
+      const data = joint.getUserData();
+      if (!data || !data.breakable) continue;
+      const force = joint.getReactionForce(invDt);
+      const torque = joint.getReactionTorque(invDt);
+      const maxF = data.maxForce;
+      const maxT = data.maxTorque;
+      const f2 = force.x * force.x + force.y * force.y;
+      if (f2 > maxF * maxF || Math.abs(torque) > maxT) {
+        broken.push(joint);
+      }
+    }
+    for (let i = 0; i < broken.length; i++) {
+      this.world.destroyJoint(broken[i]);
+    }
   }
 
   weldToNeighbors(box) {
@@ -554,7 +602,7 @@ export class Terrain {
   }
 
   breakNode(node, ix, iy) {
-    if (!this.intact.has(nodeKey(node))) return;
+    if (!this.intact.has(nodeKey(node))) return [];
 
     const pose = readPose(node);
     const around = this.collectTouching(node);
@@ -584,7 +632,7 @@ export class Terrain {
       for (const n of around) {
         if (this.intact.has(nodeKey(n))) this.refreshRockEdges(n);
       }
-      return;
+      return [];
     }
 
     const childOrder = parentOrder - 1;
@@ -625,6 +673,43 @@ export class Terrain {
     for (const kid of kids) this.refreshRockEdges(kid);
     for (const n of around) {
       if (this.intact.has(nodeKey(n))) this.refreshRockEdges(n);
+    }
+    return kids;
+  }
+
+  /**
+   * Circular blast carve: subdivide overlapping non-leaves, damage leaves with
+   * power / distSq until crater forms.
+   */
+  blastCarve(cx, cy, radiusPx, power) {
+    const rSq = radiusPx * radiusPx;
+    const minSq = BOMB_MIN_DIST_PX * BOMB_MIN_DIST_PX;
+    const queue = [];
+    const found = this.cullHash.query({
+      x0: cx - radiusPx,
+      y0: cy - radiusPx,
+      x1: cx + radiusPx,
+      y1: cy + radiusPx,
+    });
+    for (const node of found) queue.push(node);
+
+    while (queue.length) {
+      const node = queue.pop();
+      if (!node || !this.intact.has(nodeKey(node))) continue;
+      if (!aabbOverlapsCircle(node, cx, cy, rSq)) continue;
+
+      if (node.order > 0) {
+        const kids = this.breakNode(node, cx, cy);
+        for (let i = 0; i < kids.length; i++) queue.push(kids[i]);
+        continue;
+      }
+
+      const p = node.getPositionPx();
+      const dx = p.x - cx;
+      const dy = p.y - cy;
+      const rawSq = dx * dx + dy * dy;
+      const distSq = rawSq < minSq ? minSq : rawSq;
+      this.hitNode(node, cx, cy, power / distSq);
     }
   }
 

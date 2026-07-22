@@ -20,6 +20,7 @@ export const MAT_STONE = "stone";
 /**
  * Intact materials — texture/tint/physics.
  * Laser HP ≈ ceil(hardness * density): hardness = cut resistance, density = mass to ablate.
+ * strength = weld tensile (joint snap threshold); independent of hardness.
  */
 export const MATERIALS = {
   [MAT_DIRT]: {
@@ -28,6 +29,7 @@ export const MATERIALS = {
     tileScale: 0.25,
     density: 1.0,
     hardness: 1.0,
+    strength: 1.0,
   },
   [MAT_STONE]: {
     textureUrl: "assets/rocky2.jpg",
@@ -35,6 +37,7 @@ export const MATERIALS = {
     tileScale: 0.25,
     density: 1.6,
     hardness: 2.5,
+    strength: 4.0,
   },
 };
 
@@ -180,6 +183,13 @@ export const BOX_LINEAR_DAMPING = 0.1;
 export const BOX_ANGULAR_DAMPING = 0.1;
 /** AABB touch tolerance (world px) when finding weld neighbors. */
 export const BOX_TOUCH_EPS_PX = 1;
+/**
+ * Weld snap: maxForce = strength * contactLenM * WELD_FORCE_PER_STRENGTH.
+ * Tune in play (dirt hangs a few boxes; bomb / long cantilever pops).
+ */
+export const WELD_FORCE_PER_STRENGTH = 8000;
+/** maxTorque = strength * contactLenM * WELD_TORQUE_PER_STRENGTH. */
+export const WELD_TORQUE_PER_STRENGTH = 100000;
 
 /** Collision categories (Planck / Box2D filter). */
 export const CAT_WALL = 0x0001;
@@ -194,7 +204,7 @@ export const bombTunables = {
   fuseMs: 900,
   throwSpeed: px2m(280),
   /** Damage at 1px; damage = power / distSq. */
-  power: 8111,
+  power: 3000,
   /** AOE cutoff (px). */
   radiusPx: 220,
   /** Collider / sprite radius (px). */

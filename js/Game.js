@@ -307,7 +307,8 @@ export class Game {
       collideEl.checked = particleTunables.collide;
       collideEl.addEventListener("change", () => {
         particleTunables.collide = collideEl.checked;
-        if (this.terrain) this.terrain.setParticleCollide(particleTunables.collide);
+        if (this.terrain)
+          this.terrain.setParticleCollide(particleTunables.collide);
       });
     }
 
@@ -442,7 +443,7 @@ export class Game {
 
   /** Radial impulse ∝ damage (unit dir from blast center). Dynamic bodies only. */
   blastKick(body, dx, dy, distSq, damage) {
-    if (!body || typeof body.isDynamic === "function" && !body.isDynamic())
+    if (!body || (typeof body.isDynamic === "function" && !body.isDynamic()))
       return;
     const inv = 1 / Math.sqrt(distSq);
     const mag = px2m(damage * BOMB_KICK_PER_DAMAGE);
@@ -453,9 +454,20 @@ export class Game {
     );
   }
 
+  /** AABB vs blast circle (closest point on box). */
+  intactOverlapsBlast(node, bx, by, rSq) {
+    if (!node || typeof node.worldAabbInto !== "function") return false;
+    const a = node.worldAabb();
+    const qx = Math.max(a.x, Math.min(bx, a.x + a.size));
+    const qy = Math.max(a.y, Math.min(by, a.y + a.size));
+    const dx = qx - bx;
+    const dy = qy - by;
+    return dx * dx + dy * dy <= rSq;
+  }
+
   /**
-   * Radial blast: damage = power / distSq (distSq floored). Snapshot first.
-   * Impulse applied before HP so breakNode kids inherit blast velocity.
+   * Phase A: kick all dynamic bodies in blast.
+   * Phase B: circular terrain carve (subdivide + leaf damage).
    */
   detonateBomb(bomb) {
     if (!bomb || !bomb.body) return;
@@ -478,17 +490,16 @@ export class Game {
 
     const particleHit = this.terrain.freeParticles.slice();
 
+    // Phase A — impulse first (AABB overlap for intact).
     for (const node of intactHit) {
       if (!node || !node.body) continue;
+      if (!this.intactOverlapsBlast(node, bx, by, rSq)) continue;
       const p = node.getPositionPx();
       const dx = p.x - bx;
       const dy = p.y - by;
       const rawSq = dx * dx + dy * dy;
-      if (rawSq > rSq) continue;
       const distSq = rawSq < minSq ? minSq : rawSq;
-      const damage = power / distSq;
-      this.blastKick(node.body, dx, dy, distSq, damage);
-      this.terrain.hitNode(node, bx, by, damage);
+      this.blastKick(node.body, dx, dy, distSq, power / distSq);
     }
 
     for (const piece of particleHit) {
@@ -499,7 +510,7 @@ export class Game {
       const rawSq = dx * dx + dy * dy;
       if (rawSq > rSq) continue;
       const distSq = rawSq < minSq ? minSq : rawSq;
-      this.blastKick(piece.body, dx, dy, distSq, power / distSq);
+      this.blastKick(piece.body, dx, dy, distSq, (power * 2) / distSq);
     }
 
     if (this.character && this.character.body) {
@@ -509,15 +520,12 @@ export class Game {
       const rawSq = dx * dx + dy * dy;
       if (rawSq <= rSq) {
         const distSq = rawSq < minSq ? minSq : rawSq;
-        this.blastKick(
-          this.character.body,
-          dx,
-          dy,
-          distSq,
-          power / distSq,
-        );
+        this.blastKick(this.character.body, dx, dy, distSq, power / distSq);
       }
     }
+
+    // Phase B — circular crater carve.
+    this.terrain.blastCarve(bx, by, r, power);
 
     this.explosions.push({
       x: bx,
@@ -633,6 +641,7 @@ export class Game {
     // } else {
     // this.world.step(1 / 60, 4, 1);
     // }
+    this.terrain.cullBrokenWelds(1 / 60);
     this.updateBombs(t);
     this.terrain.cullParticles(t);
     this.terrain.coalesceQuiet(this.camera.viewBounds(VIEW_CULL_MARGIN_PX));
