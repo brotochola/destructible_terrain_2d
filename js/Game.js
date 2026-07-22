@@ -28,7 +28,6 @@ import { Character } from "./Character.js";
 import { FrameFps, MsMeter } from "./FpsMeter.js";
 import { Renderer } from "./Renderer.js";
 import { Terrain } from "./Terrain.js";
-import { mushTextureDataURL } from "./rockMush.js";
 
 const WALL_MASK = CAT_WALL | CAT_INTACT | CAT_PARTICLE | CAT_CHARACTER;
 
@@ -92,8 +91,7 @@ export class Game {
       particles: this.renderer.particles,
       particleBuckets: this.renderer.particleBuckets,
       particleTextures: this.renderer.particleTextures,
-      rockTexturesByOrder: this.renderer.rockTexturesByOrder,
-      rockMushRecipes: this.renderer.rockMushRecipes,
+      rockTexture: this.renderer.rockTexture,
     });
 
     this.bindContacts();
@@ -282,53 +280,6 @@ export class Game {
     }
 
     this.bindParticleTunables();
-    this.bindMushPreview();
-  }
-
-  bindMushPreview() {
-    const check = document.getElementById("mush-preview");
-    const panel = document.getElementById("mush-preview-panel");
-    const orderSel = document.getElementById("mush-order");
-    const gallery = document.getElementById("mush-gallery");
-    if (!check || !panel || !orderSel || !gallery) return;
-
-    const byOrder = this.renderer && this.renderer.rockTexturesByOrder;
-    if (!byOrder) return;
-
-    orderSel.replaceChildren();
-    for (let o = 0; o < byOrder.length; o++) {
-      const list = byOrder[o];
-      if (!list || !list.length) continue;
-      const opt = document.createElement("option");
-      opt.value = String(o);
-      const side = list[0].width | 0;
-      opt.textContent = `order ${o} · ${list.length} var · ${side}px`;
-      orderSel.appendChild(opt);
-    }
-
-    const renderGallery = () => {
-      gallery.replaceChildren();
-      const order = Number(orderSel.value) || 0;
-      const variants = byOrder[order] || [];
-      for (let i = 0; i < variants.length; i++) {
-        const fig = document.createElement("figure");
-        const img = document.createElement("img");
-        img.src = mushTextureDataURL(variants[i]);
-        img.alt = `order ${order} v${i}`;
-        const cap = document.createElement("figcaption");
-        cap.textContent = `v${i}`;
-        fig.append(img, cap);
-        gallery.appendChild(fig);
-      }
-    };
-
-    check.addEventListener("change", () => {
-      panel.hidden = !check.checked;
-      if (check.checked) renderGallery();
-    });
-    orderSel.addEventListener("change", () => {
-      if (check.checked) renderGallery();
-    });
   }
 
   bindParticleTunables() {

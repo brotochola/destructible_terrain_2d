@@ -18,7 +18,6 @@ import {
 import { Box } from "./Box.js";
 import { CirclePiece, ParticlePool } from "./CirclePiece.js";
 import { SpatialHash } from "./SpatialHash.js";
-import { pickMush, resolveMushHint, synthesizeRecipe, bodyQuadToUvQuad } from "./rockMush.js";
 
 function nodeKey(box) {
   return box.rootId + "_" + box.order + "_" + box.gx + "_" + box.gy;
@@ -75,7 +74,7 @@ function edgeChildCoords(gx, gy, dx, dy) {
 function gatherEdgeLeaves(intact, rootId, o, gx, gy, dx, dy) {
   const box = intact.get(keyAt(rootId, o, gx, gy));
   if (box) return [box];
-  if (o <= 1) return [];
+  if (o <= 0) return [];
   const out = [];
   for (const [cx, cy] of edgeChildCoords(gx, gy, dx, dy)) {
     out.push(...gatherEdgeLeaves(intact, rootId, o - 1, cx, cy, dx, dy));
@@ -122,6 +121,43 @@ function boxesTouch(a, b, eps) {
     A.y + A.size < B.y - eps ||
     B.y + B.size < A.y - eps
   );
+}
+
+/** Interval along shared face (layout px). Horizontal faces → X; vertical → Y. */
+function edgeAlongInterval(box, dx, dy) {
+  if (dx !== 0) {
+    return { a0: box.layoutY, a1: box.layoutY + box.size };
+  }
+  return { a0: box.layoutX, a1: box.layoutX + box.size };
+}
+
+function mergeIntervals(intervals, eps) {
+  if (!intervals.length) return [];
+  const sorted = intervals.slice().sort((u, v) => u.a0 - v.a0);
+  const out = [{ a0: sorted[0].a0, a1: sorted[0].a1 }];
+  for (let i = 1; i < sorted.length; i++) {
+    const iv = sorted[i];
+    const last = out[out.length - 1];
+    if (iv.a0 <= last.a1 + eps) last.a1 = Math.max(last.a1, iv.a1);
+    else out.push({ a0: iv.a0, a1: iv.a1 });
+  }
+  return out;
+}
+
+/** Gaps on [a0,a1] not covered by `covered` intervals. */
+function uncoveredGaps(a0, a1, covered, eps) {
+  const merged = mergeIntervals(covered, eps);
+  const gaps = [];
+  let cur = a0;
+  for (const iv of merged) {
+    const lo = Math.max(iv.a0, a0);
+    const hi = Math.min(iv.a1, a1);
+    if (hi <= lo + eps) continue;
+    if (lo > cur + eps) gaps.push({ a0: cur, a1: Math.min(lo, a1) });
+    cur = Math.max(cur, hi);
+  }
+  if (cur < a1 - eps) gaps.push({ a0: cur, a1: a1 });
+  return gaps;
 }
 
 function weldBoxes(world, a, b) {
@@ -185,7 +221,7 @@ const NEIGHBOR_DIRS = [
 export class Terrain {
   /**
    * @param {*} world Planck world
-   * @param {{ boxes: import('pixi.js').Container, particles: import('pixi.js').Container, particleBuckets?: import('pixi.js').ParticleContainer[], particleTextures?: import('pixi.js').Texture[], rockTexturesByOrder?: import('pixi.js').Texture[][], rockMushRecipes?: { variant: number, rot: number }[][][] }} layers
+   * @param {{ boxes: import('pixi.js').Container, particles: import('pixi.js').Container, particleBuckets?: import('pixi.js').ParticleContainer[], particleTextures?: import('pixi.js').Texture[], rockTexture?: import('pixi.js').Texture }} layers
    */
   constructor(world, layers = null) {
     this.world = world;
@@ -193,8 +229,7 @@ export class Terrain {
     this.particleLayer = layers && layers.particles;
     this.particleBuckets = (layers && layers.particleBuckets) || null;
     this.particleTextures = layers && layers.particleTextures;
-    this.rockTexturesByOrder = layers && layers.rockTexturesByOrder;
-    this.rockMushRecipes = layers && layers.rockMushRecipes;
+    this.rockTexture = layers && layers.rockTexture;
     this.intact = new Map();
     this.dynamicIntact = new Set();
     this.freeParticles = [];
@@ -209,6 +244,7 @@ export class Terrain {
     /** @type {Set<import('./Box.js').Box>} */
     this._cullOn = new Set();
     this._cullQueryScratch = new Set();
+    this._touchScratch = new Set();
     this._cullCamX = NaN;
     this._cullCamY = NaN;
     this._cullCamVs = NaN;
@@ -234,13 +270,133 @@ export class Terrain {
         weldBoxes(this.world, box, other);
       }
     }
-    // Cross-root layout seams (gx/gy not shared across rootId).
-    for (const other of this.intact.values()) {
-      if (other === box || other.rootId === box.rootId) continue;
-      if (!box.isDynamic && !other.isDynamic) continue;
-      if (!boxesTouch(box, other, BOX_TOUCH_EPS_PX)) continue;
+    this.forCrossRootTouching(box, (other) => {
+      if (!box.isDynamic && !other.isDynamic) return;
       weldBoxes(this.world, box, other);
+    });
+  }
+
+  /** Nearby intact from other roots (spatial hash; not full scan). */
+  forCrossRootTouching(box, fn) {
+    const A = aabbOf(box);
+    const eps = BOX_TOUCH_EPS_PX;
+    const near = this.cullHash.queryInto(
+      {
+        x0: A.x - eps,
+        y0: A.y - eps,
+        x1: A.x + A.size + eps,
+        y1: A.y + A.size + eps,
+      },
+      this._touchScratch,
+    );
+    for (const other of near) {
+      if (other === box || other.rootId === box.rootId) continue;
+      if (!boxesTouch(box, other, eps)) continue;
+      fn(other);
     }
+  }
+
+  /**
+   * Uncovered layout intervals on a face. Empty = fully sealed (flush, no stroke).
+   * Partial dig → only the hole segments jag/stroke.
+   */
+  getFaceGaps(box, dx, dy) {
+    const target = edgeAlongInterval(box, dx, dy);
+    const eps = BOX_TOUCH_EPS_PX;
+    const covered = [];
+    let sealed = false;
+
+    const neighbors = faceNeighbors(
+      this.intact,
+      box.rootId,
+      box.order,
+      box.gx,
+      box.gy,
+      dx,
+      dy,
+    );
+    for (const n of neighbors) {
+      if (n.order >= box.order) return [];
+      covered.push(edgeAlongInterval(n, dx, dy));
+    }
+
+    const A = aabbOf(box);
+    // Snapshot first — getFaceGaps may run while another touch query is live.
+    const cross = [];
+    this.forCrossRootTouching(box, (other) => cross.push(other));
+    for (const other of cross) {
+      const B = aabbOf(other);
+      let onFace = false;
+      if (dx === 1 && B.x + eps >= A.x + A.size) onFace = true;
+      if (dx === -1 && B.x + B.size <= A.x + eps) onFace = true;
+      if (dy === 1 && B.y + eps >= A.y + A.size) onFace = true;
+      if (dy === -1 && B.y + B.size <= A.y + eps) onFace = true;
+      if (!onFace) continue;
+      if (other.order >= box.order) {
+        sealed = true;
+        break;
+      }
+      covered.push(edgeAlongInterval(other, dx, dy));
+    }
+    if (sealed) return [];
+
+    return uncoveredGaps(target.a0, target.a1, covered, eps);
+  }
+
+  refreshRockEdges(box) {
+    if (!box || !box.applyRockSilhouette) return;
+    box.applyRockSilhouette({
+      right: this.getFaceGaps(box, 1, 0),
+      left: this.getFaceGaps(box, -1, 0),
+      bottom: this.getFaceGaps(box, 0, 1),
+      top: this.getFaceGaps(box, 0, -1),
+    });
+  }
+
+  refreshNeighborRockEdges(box) {
+    for (const [dx, dy] of NEIGHBOR_DIRS) {
+      for (const n of faceNeighbors(
+        this.intact,
+        box.rootId,
+        box.order,
+        box.gx,
+        box.gy,
+        dx,
+        dy,
+      )) {
+        this.refreshRockEdges(n);
+      }
+    }
+    const cross = [];
+    this.forCrossRootTouching(box, (other) => cross.push(other));
+    for (const other of cross) this.refreshRockEdges(other);
+  }
+
+  /** Neighbors that share a face — refresh after this node is removed. */
+  collectTouching(box) {
+    const out = [];
+    const seen = new Set();
+    for (const [dx, dy] of NEIGHBOR_DIRS) {
+      for (const n of faceNeighbors(
+        this.intact,
+        box.rootId,
+        box.order,
+        box.gx,
+        box.gy,
+        dx,
+        dy,
+      )) {
+        if (n === box || seen.has(n)) continue;
+        seen.add(n);
+        out.push(n);
+      }
+    }
+    this.forCrossRootTouching(box, (other) => {
+      if (seen.has(other)) return;
+      seen.add(other);
+      out.push(other);
+    });
+    return out;
   }
 
   /**
@@ -252,7 +408,7 @@ export class Terrain {
    * @param {number|string} rootId
    * @param {number} [angle]
    * @param {{ vx: number, vy: number, omega: number } | null} [velocity]
-   * @param {{ variant: number, rot: number } | null} [mushHint] from parent recipe on break
+   * @param {{ tilePosX?: number, tilePosY?: number, layoutX?: number, layoutY?: number, edgeSeed?: number } | null} [visual]
    */
   createNode(
     order,
@@ -263,15 +419,10 @@ export class Terrain {
     rootId,
     angle = 0,
     velocity = null,
-    mushHint = null,
+    visual = null,
   ) {
-    const mush = mushHint
-      ? resolveMushHint(this.rockTexturesByOrder, order, mushHint)
-      : pickMush(this.rockTexturesByOrder, order, rootId, gx, gy);
-    if (this.boxLayer && (!mush || !mush.texture)) {
-      throw new Error(
-        `rock mush texture missing for order ${order} (bake / pick failed)`,
-      );
+    if (this.boxLayer && !this.rockTexture) {
+      throw new Error("rock texture missing for intact boxes");
     }
     const box = new Box(
       this.world,
@@ -283,9 +434,8 @@ export class Terrain {
       rootId,
       this.boxLayer,
       angle,
-      mush ? mush.texture : null,
-      mush ? mush.variant : 0,
-      mush ? mush.texRot : 0,
+      this.rockTexture,
+      visual,
     );
     if (velocity && box.isDynamic && box.body) {
       box.body.setLinearVelocity(Vec2(velocity.vx, velocity.vy));
@@ -295,6 +445,8 @@ export class Terrain {
     if (box.isDynamic) this.dynamicIntact.add(box);
     this.cullHash.insert(box);
     this.weldToNeighbors(box);
+    this.refreshRockEdges(box);
+    this.refreshNeighborRockEdges(box);
     return box;
   }
 
@@ -350,6 +502,7 @@ export class Terrain {
     if (!this.intact.has(nodeKey(node))) return;
 
     const pose = readPose(node);
+    const around = this.collectTouching(node);
 
     this.dynamicIntact.delete(node);
     this.cullHash.remove(node);
@@ -358,41 +511,42 @@ export class Terrain {
     const parentGx = node.gx;
     const parentGy = node.gy;
     const parentOrder = node.order;
-    const parentMushVariant = node.mushVariant;
-    const parentTexRot = node.texRot || 0;
     const rootId = node.rootId;
+    const parentVisual = {
+      tilePosX: node.tilePosX,
+      tilePosY: node.tilePosY,
+      layoutX: node.layoutX,
+      layoutY: node.layoutY,
+      edgeSeed: node.edgeSeed,
+    };
     const shatter = parentOrder === 0;
     node.destroy();
     this.intact.delete(nodeKey(node));
 
     if (shatter) {
       this.shatterToParticles({ size: parentSize }, pose);
+      for (const n of around) {
+        if (this.intact.has(nodeKey(n))) this.refreshRockEdges(n);
+      }
       return;
     }
 
     const childOrder = parentOrder - 1;
+    const childSize = parentSize / 2;
     const velocity = {
       vx: pose.vx,
       vy: pose.vy,
       omega: pose.omega,
     };
-    const parentRecipes =
-      this.rockMushRecipes && this.rockMushRecipes[parentOrder];
-    const parentRecipe =
-      (parentRecipes && parentRecipes[parentMushVariant]) ||
-      synthesizeRecipe(rootId, parentOrder, parentGx, parentGy);
-    // One subdivision level per laser hit (no recurse to leaf).
     for (let dx = 0; dx < 2; dx++) {
       for (let dy = 0; dy < 2; dy++) {
         const place = childPlacement(pose, parentSize, dx, dy);
-        const uv = bodyQuadToUvQuad(dx, dy, parentTexRot);
-        const base = parentRecipe[uv.dy * 2 + uv.dx] || {
-          variant: 0,
-          rot: 0,
-        };
-        const mushHint = {
-          variant: base.variant || 0,
-          rot: parentTexRot + base.rot,
+        const visual = {
+          tilePosX: parentVisual.tilePosX - dx * childSize,
+          tilePosY: parentVisual.tilePosY - dy * childSize,
+          layoutX: parentVisual.layoutX + dx * childSize,
+          layoutY: parentVisual.layoutY + dy * childSize,
+          edgeSeed: parentVisual.edgeSeed,
         };
         this.createNode(
           childOrder,
@@ -403,9 +557,12 @@ export class Terrain {
           rootId,
           pose.angle,
           velocity,
-          mushHint,
+          visual,
         );
       }
+    }
+    for (const n of around) {
+      if (this.intact.has(nodeKey(n))) this.refreshRockEdges(n);
     }
   }
 
@@ -421,7 +578,6 @@ export class Terrain {
     const d = this.intact.get(keyAt(rootId, order, gx + 1, gy + 1));
     if (!b || !c || !d) return false;
     if (b.isDynamic || c.isDynamic || d.isDynamic) return false;
-    // Static mamushka cells stay axis-aligned; skip if any drifted somehow.
     if (
       a.body.getAngle() ||
       b.body.getAngle() ||
@@ -436,6 +592,7 @@ export class Terrain {
     const parentGy = gy >> 1;
     const parentX = a.x;
     const parentY = a.y;
+    const visual = a.visualAsParent();
 
     for (const sib of [a, b, c, d]) {
       this.dynamicIntact.delete(sib);
@@ -454,6 +611,7 @@ export class Terrain {
       rootId,
       0,
       null,
+      visual,
     );
     return true;
   }
@@ -561,7 +719,6 @@ export class Terrain {
   }
 
   syncGfx(viewBounds = null, activeBounds = null) {
-    // Always sync awake dynamics (pose + hash cell).
     for (const node of this.dynamicIntact) {
       if (!node.body || !node.body.isAwake()) continue;
       node.syncTransform();
@@ -583,13 +740,11 @@ export class Terrain {
       for (const node of this._cullOn) {
         if (!next.has(node)) node.forceCullOff();
       }
-      // Swap sets without allocating.
       const prev = this._cullOn;
       this._cullOn = next;
       this._cullQueryScratch = prev;
       prev.clear();
     } else {
-      // Camera steady — only re-cull moving dynamics near edges.
       for (const node of this.dynamicIntact) {
         node.syncSim(viewBounds, activeBounds);
         if (

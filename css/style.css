@@ -20,36 +20,3 @@ button:hover { background: #385; }
 #zoomctl { position: fixed; bottom: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; }
 #zoomctl button { width: 44px; height: 44px; font-size: 22px; border-radius: 50%; margin: 0; background: #1b2733cc; border: 1px solid #3a5; }
 canvas { display: block; cursor: crosshair; touch-action: none; }
-
-#mush-preview-panel {
-  position: fixed; top: 8px; right: 8px; bottom: 72px; width: min(420px, 42vw);
-  background: #000c; color: #cfe8ff; border-radius: 8px; padding: 8px 10px;
-  display: flex; flex-direction: column; gap: 8px; z-index: 5;
-  font-size: 12px; overflow: hidden;
-}
-#mush-preview-panel[hidden] { display: none !important; }
-.mush-preview-head {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0;
-}
-.mush-preview-head select {
-  background: #1a2430; color: #cfe8ff; border: 1px solid #3a4a5a; border-radius: 4px; padding: 2px 4px;
-}
-.mush-gallery {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px;
-  overflow: auto; flex: 1; align-content: start;
-}
-.mush-gallery figure {
-  margin: 0; background: #0e1620; border: 1px solid #2a3a4a; border-radius: 6px;
-  padding: 4px; text-align: center;
-}
-.mush-gallery img {
-  display: block; width: 100%; height: auto; image-rendering: pixelated;
-  background:
-    linear-gradient(45deg, #1a2430 25%, transparent 25%),
-    linear-gradient(-45deg, #1a2430 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #1a2430 75%),
-    linear-gradient(-45deg, transparent 75%, #1a2430 75%);
-  background-size: 12px 12px;
-  background-position: 0 0, 0 6px, 6px -6px, -6px 0;
-}
-.mush-gallery figcaption { margin-top: 2px; color: #9ab; font-size: 11px; }

@@ -15,54 +15,46 @@ export function orderSize(n) {
   return P_D * 2 ** n;
 }
 
+/** Shared bedrock texture (world-locked tile UVs on each intact box). */
+export const ROCK_TEXTURE_URL = "assets/rocky.jpg";
+/** TilingSprite tileScale — lower = denser stones / more repeats. */
+export const ROCK_TILE_SCALE = 0.25;
+/** Multiply tint on grayscale rock (warm dirt). */
+export const ROCK_TINT = 0xc4a574;
 /** Shatter bolita sprites (scaled down to SHATTER_BALL diameter). */
 export const ROCK_PARTICLE_URLS = ["assets/rock1.png", "assets/rock2.png"];
-/** Shatter ball radius in px. */
-
 /**
- * On-screen rock sprite max side (CirclePiece + order-1 mush stamps).
+ * On-screen shatter ball max side.
  * Collider diam * 1.3 overhang.
  */
 export const ROCK_PARTICLE_VISUAL = SHATTER_BALL_RADIUS * 2 * 1.3;
+
+/** Exposed-edge rocky silhouette (visual only; physics stay AABB). */
+/** World/layout px inset amplitude — fixed so splits keep same chew. */
+export const ROCK_EDGE_AMP = 2.5;
+/** Second octave amp (finer detail, less repetitive waves). */
+export const ROCK_EDGE_AMP2 = 1.1;
+/** Noise cell size (layout px); bilinear across cells = soft waves. */
+export const ROCK_EDGE_STEP = 6;
+/** Vertices per noise cell along an edge (denser = rounder polyline). */
+export const ROCK_EDGE_SAMPLES_PER_STEP = 3;
+/** Push stroke slightly into the void so ceilings/floors both read. */
+export const ROCK_EDGE_STROKE_OUTSET = 0.45;
+export const ROCK_EDGE_STROKE = 0x2a2118;
+export const ROCK_EDGE_STROKE_WIDTH_FRAC = 0.02;
+export const ROCK_EDGE_STROKE_WIDTH_MAX = 2;
 /**
- * Order-1 world visual side (px) — sprite size in game, independent of bake res.
- * Overflow / ratio stay tied to this so doubling bake tex does not enlarge sprites.
+ * Cap cacheAsTexture side (px). Large roots bake soft; shatter → sharper kids.
+ * ponytail: ceiling 512² VRAM/box; raise if zoom-in on big chunks looks soft.
  */
-export const ROCK_MUSH_WORLD_VISUAL = 64;
-/** Order-1 bake tex side (px). Order-0 = this/2; higher = this * 2^(n-1). */
-export const ROCK_MUSH_MIN_TEX = 128;
-/** Highest order with its own baked atlas (128→2048). */
-export const ROCK_MUSH_BAKE_MAX_ORDER = 5;
-export const ROCK_MUSH_SEED = 1212;
-/** First order baked as 2× child composite (orders below = stamp clusters). */
-export const ROCK_MUSH_COMPOSITE_MIN_ORDER = 5;
-/** Stamp density for order-1 cluster bake. */
-export const ROCK_MUSH_DENSITY = 1;
-
-/** Texture side for baked order n (0..BAKE_MAX): 64, 128, 256, … 2048. */
-export function orderTexSize(n) {
-  return ROCK_MUSH_MIN_TEX * 2 ** (n - 1);
-}
-
-/** Visual / collider scale for stamp orders (world neighbors + baked into first composite). */
-export const ROCK_MUSH_VISUAL_RATIO = 1.2; //ROCK_MUSH_WORLD_VISUAL / orderSize(1);
-
-/** Visual overflow (world px) for a collider of `boxSize`. */
-export function rockMushOverflow(boxSize, order = 1) {
-  return (rockMushVisualSize(boxSize, order) - boxSize) / 2;
-}
-
-/** Visual sprite side. Stamp orders use ratio; composites = collider (ratio baked in). */
-export function rockMushVisualSize(boxSize, order = 1) {
-  if (order < ROCK_MUSH_COMPOSITE_MIN_ORDER)
-    return boxSize * ROCK_MUSH_VISUAL_RATIO;
-  return boxSize;
-}
+export const ROCK_CACHE_MAX_PX = 512;
 
 /** Procedural map size (layout px). */
 export const MAP_W = 4000;
 export const MAP_H = 1200;
 export const MAP_SEED = 919191;
+/** Global edge-noise seed — world-locked so neighboring roots share chew. */
+export const ROCK_EDGE_SEED = MAP_SEED ^ 0x51eed;
 /** Noise frequency in order-1 cell units (lower = bigger caves). */
 export const NOISE_SCALE = 0.06;
 export const NOISE_OCTAVES = 2;

@@ -11,13 +11,11 @@ import {
 } from 'https://cdn.jsdelivr.net/npm/pixi.js@8.19.0/dist/pixi.min.mjs';
 import {
   H,
-  ROCK_MUSH_BAKE_MAX_ORDER,
-  ROCK_MUSH_SEED,
   ROCK_PARTICLE_URLS,
+  ROCK_TEXTURE_URL,
   W,
   m2px,
 } from './config.js';
-import { bakeRockMushTextures } from './rockMush.js';
 
 const DEBUG_COLORS = {
   wall: 0x888888,
@@ -37,10 +35,8 @@ export class Renderer {
     this.particles = null;
     this.particleTextures = null;
     this.particleBuckets = null;
-    /** @type {import('pixi.js').Texture[][] | null} */
-    this.rockTexturesByOrder = null;
-    /** @type {{ variant: number, rot: number }[][][] | null} */
-    this.rockMushRecipes = null;
+    /** @type {import('pixi.js').Texture | null} */
+    this.rockTexture = null;
     this.fx = null;
     this.actors = null;
     this.laserGfx = null;
@@ -67,12 +63,7 @@ export class Renderer {
     this.particleTextures = await Promise.all(
       ROCK_PARTICLE_URLS.map((url) => Assets.load(url))
     );
-    const baked = bakeRockMushTextures(this.particleTextures, {
-      maxOrder: ROCK_MUSH_BAKE_MAX_ORDER,
-      seed: ROCK_MUSH_SEED,
-    });
-    this.rockTexturesByOrder = baked.byOrder;
-    this.rockMushRecipes = baked.recipes;
+    this.rockTexture = await Assets.load(ROCK_TEXTURE_URL);
 
     this.world = new Container();
     this.boxes = new Container();
