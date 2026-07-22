@@ -405,9 +405,53 @@ export class Box extends GameObject {
     }
   }
 
-  syncGfx() {
-    if (!this.isDynamic || !this.gfx || !this.body) return;
-    if (!this.body.isAwake()) return;
+  /** World-px AABB of current pose (axis-aligned; ignores rotation). */
+  worldAabb() {
+    if (this.body) {
+      const p = this.body.getPosition();
+      const hs = this.size / 2;
+      return { x: m2px(p.x) - hs, y: m2px(p.y) - hs, size: this.size };
+    }
+    return { x: this.x, y: this.y, size: this.size };
+  }
+
+  overlapsBounds(bounds) {
+    if (!bounds) return true;
+    const a = this.worldAabb();
+    return !(
+      a.x + a.size < bounds.x0 ||
+      a.x > bounds.x1 ||
+      a.y + a.size < bounds.y0 ||
+      a.y > bounds.y1
+    );
+  }
+
+  /**
+   * Cull gfx to viewBounds; sync transform if dynamic + awake.
+   * Cull physics active state to activeBounds (laser-safe margin).
+   */
+  syncGfx(viewBounds = null, activeBounds = null) {
+    if (!this.gfx || !this.body) return;
+
+    if (activeBounds) {
+      const want = this.overlapsBounds(activeBounds);
+      if (want) {
+        if (!this.body.isActive()) {
+          this.body.setActive(true);
+          if (this.isDynamic) this.body.setAwake(true);
+        }
+      } else if (this.body.isActive()) {
+        this.body.setActive(false);
+      }
+    }
+
+    if (viewBounds) {
+      this.gfx.visible = this.overlapsBounds(viewBounds);
+    } else {
+      this.gfx.visible = true;
+    }
+
+    if (!this.isDynamic || !this.body.isAwake()) return;
     const p = this.body.getPosition();
     this.gfx.position.set(m2px(p.x), m2px(p.y));
     this.gfx.rotation = this.body.getAngle();

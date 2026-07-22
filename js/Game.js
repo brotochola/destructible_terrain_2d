@@ -3,7 +3,6 @@ import {
   CAT_INTACT,
   CAT_PARTICLE,
   CAT_WALL,
-  CHAR_SIZE,
   H,
   LASER_COOLDOWN_MS,
   LASER_FLASH_MS,
@@ -11,6 +10,8 @@ import {
   PHYS_H,
   PHYS_W,
   SOLVER_BUSY_DYNAMIC_COUNT,
+  SPAWN_LAYOUT,
+  PHYS_ACTIVE_MARGIN_PX,
   VIEW_CULL_MARGIN_PX,
   Vec2,
   W,
@@ -251,8 +252,8 @@ export class Game {
       this.character.destroy();
       this.character = null;
     }
-    const x = originX + contentW / 2;
-    const y = terrainTop - CHAR_SIZE * 3;
+    const x = originX + SPAWN_LAYOUT.x;
+    const y = terrainTop + SPAWN_LAYOUT.y;
     this.character = new Character(this.world, x, y, this.renderer.actors);
   }
 
@@ -323,7 +324,10 @@ export class Game {
     };
 
     this.renderer.applyCamera(this.camera);
-    this.terrain.syncGfx(this.camera.viewBounds(VIEW_CULL_MARGIN_PX));
+    this.terrain.syncGfx(
+      this.camera.viewBounds(VIEW_CULL_MARGIN_PX),
+      this.camera.viewBounds(PHYS_ACTIVE_MARGIN_PX),
+    );
     this.renderer.drawLasers(this.lasers, vs);
     if (this.character) this.character.syncGfx(view);
     if (this.debugPhys) {

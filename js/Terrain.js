@@ -2,6 +2,7 @@ import {
   BOX_TOUCH_EPS_PX,
   LEVEL_LAYOUT,
   MAX_FREE_PARTICLES,
+  MAX_MAMUSHKA_ORDER,
   PARTICLE_MAX_AGE_MS,
   PARTICLE_SETTLE_FRAMES,
   SHATTER_BALL_COUNT,
@@ -24,9 +25,6 @@ function nodeKey(box) {
 function keyAt(rootId, order, gx, gy) {
   return rootId + "_" + order + "_" + gx + "_" + gy;
 }
-
-/** Largest root order in layout — coarser walk ceiling. */
-const MAX_MAMUSHKA_ORDER = Math.max(...LEVEL_LAYOUT.map((i) => i.order));
 
 /** Intact box covering cell (order, gx, gy), or null. Walks parents if subdivided away. */
 function findCovering(intact, rootId, order, gx, gy) {
@@ -627,9 +625,9 @@ export class Terrain {
     this.initFromLayout();
   }
 
-  syncGfx(viewBounds = null) {
-    for (const node of this.dynamicIntact) {
-      node.syncGfx();
+  syncGfx(viewBounds = null, activeBounds = null) {
+    for (const node of this.intact.values()) {
+      node.syncGfx(viewBounds, activeBounds);
     }
     for (const piece of this.freeParticles) {
       piece.syncGfx(viewBounds);

@@ -42,7 +42,7 @@ export class Renderer {
       height: H,
       background: 0x0e1620,
       antialias: false,
-      resolution: window.devicePixelRatio || 1,
+      resolution: 1,
       autoDensity: true,
     });
     this.app.ticker.stop();

@@ -1,3 +1,5 @@
+import { findHollowSpawn, generateLevel } from "./procgen.js";
+
 export const W = window.innerWidth;
 export const H = window.innerHeight;
 export const ZOOM = 4;
@@ -35,32 +37,62 @@ export const ROCK_EDGE_STROKE = 0x2e1702;
 export const ROCK_EDGE_STROKE_WIDTH_FRAC = 0.02;
 export const ROCK_EDGE_STROKE_WIDTH_MAX = 2;
 
+/** Procedural map size (layout px). */
+export const MAP_W = 5000;
+export const MAP_H = 2000;
+export const MAP_SEED = 42;
+/** Noise frequency in order-1 cell units (lower = bigger caves). */
+export const NOISE_SCALE = 0.015;
+export const NOISE_OCTAVES = 2;
+export const NOISE_LACUNARITY = 2;
+export const NOISE_GAIN = 0.5;
+/** Solid when fbm + yBias*depth > threshold. */
+export const SOLID_THRESHOLD = 0.15;
+/** Extra solid toward bottom (0 = free islands, ~0.4 = slab+caves). */
+export const NOISE_Y_BIAS = 0.5;
+/** Cap packed root order (order 9 → 2560 px side). */
+export const MAX_PACK_ORDER = 9;
+
+const _gen = generateLevel({
+  mapW: MAP_W,
+  mapH: MAP_H,
+  cellSizePx: orderSize(1),
+  seed: MAP_SEED,
+  scale: NOISE_SCALE,
+  octaves: NOISE_OCTAVES,
+  lacunarity: NOISE_LACUNARITY,
+  gain: NOISE_GAIN,
+  threshold: SOLID_THRESHOLD,
+  yBias: NOISE_Y_BIAS,
+  maxPackOrder: MAX_PACK_ORDER,
+});
+
 /**
  * Root boxes in layout-local px (added to originX / terrainTop).
- * order N → size P_D*2^N, full shatter → (2^N)^2 bolitas.
+ * Packed from Perlin occupancy — order N → size P_D*2^N.
  */
-const max_order = 7;
-export const LEVEL_LAYOUT = [
-  { order: max_order, x: 0, y: 0 },
-  { order: max_order, x: orderSize(max_order), y: 50 },
-];
+export const LEVEL_LAYOUT = _gen.layout;
+export const MAP_OCCUPANCY = _gen.solid;
+export const MAP_COLS = _gen.cols;
+export const MAP_ROWS = _gen.rows;
 
-function layoutBounds(layout) {
-  let w = 0;
-  let h = 0;
-  for (const item of layout) {
-    const s = orderSize(item.order);
-    w = Math.max(w, item.x + s);
-    h = Math.max(h, item.y + s);
-  }
-  return { w, h };
-}
-
-export const terrainBounds = layoutBounds(LEVEL_LAYOUT);
-export const contentW = Math.max(terrainBounds.w, orderSize(1));
-export const contentH = Math.max(terrainBounds.h, orderSize(1));
+export const contentW = MAP_W;
+export const contentH = MAP_H;
 /** Largest side of content — used for default camera zoom. */
 export const contentSize = Math.max(contentW, contentH);
+/** Ceiling for findCovering / coalesce parent walks. */
+export const MAX_MAMUSHKA_ORDER =
+  LEVEL_LAYOUT.length > 0
+    ? Math.max(...LEVEL_LAYOUT.map((i) => i.order))
+    : MAX_PACK_ORDER;
+
+/** Layout-local spawn in a hollow cell near top-center. */
+export const SPAWN_LAYOUT = findHollowSpawn(
+  MAP_OCCUPANCY,
+  MAP_COLS,
+  MAP_ROWS,
+  orderSize(1),
+) ?? { x: contentW / 2, y: orderSize(1) };
 
 export const PHYS_W = contentW * 3;
 export const PHYS_H = contentH * 3;
@@ -103,9 +135,11 @@ export const MAX_FREE_PARTICLES = 800;
 export const PARTICLE_MAX_AGE_MS = 12000;
 export const PARTICLE_SETTLE_FRAMES = 90;
 export const VIEW_CULL_MARGIN_PX = 120;
+/** Body active if AABB overlaps view expanded by this (≥ LASER_RANGE px). */
+export const PHYS_ACTIVE_MARGIN_PX = 900;
 export const SOLVER_BUSY_DYNAMIC_COUNT = 200;
 
-export const MIN_ZOOM = 0.33;
+export const MIN_ZOOM = 0.033;
 export const MAX_ZOOM = 12;
 
 export const pl = window.planck;
