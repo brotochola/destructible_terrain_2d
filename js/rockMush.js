@@ -1,7 +1,7 @@
 import { Texture } from "https://cdn.jsdelivr.net/npm/pixi.js@8.19.0/dist/pixi.min.mjs";
 import {
   ROCK_MUSH_BAKE_MAX_ORDER,
-  ROCK_MUSH_DENSITY,
+  ROCK_MUSH_COMPOSITE_MIN_ORDER,
   ROCK_MUSH_MIN_TEX,
   ROCK_MUSH_SEED,
   ROCK_MUSH_VISUAL_RATIO,
@@ -37,7 +37,8 @@ function texList(byOrder, order) {
   if (!byOrder) return null;
   let variants = byOrder[order];
   if (!variants || !variants.length) {
-    for (let o = Math.min(order, ROCK_MUSH_BAKE_MAX_ORDER); o >= 1; o--) {
+    const start = Math.min(Math.max(order, 0), ROCK_MUSH_BAKE_MAX_ORDER);
+    for (let o = start; o >= 0; o--) {
       variants = byOrder[o];
       if (variants && variants.length) break;
     }
@@ -259,20 +260,20 @@ function stampRock(ctx, brushes, cx, cy, stampPx, rng) {
   );
 }
 
-/** Order-1 stamp size in bake tex px. Rock pixel size stays fixed across orders
+/** Stamp size in bake tex px. Rock pixel size stays fixed across orders
  * (composites blit children 1:1), so seam stamps must use this same value. */
-function order1StampPx() {
+function stampPx() {
   return ROCK_PARTICLE_VISUAL * 3;
 }
 
 /**
- * Order-1: pad work canvas → stamp (centers inset so stamps stay whole) →
+ * Stamp cluster: pad work canvas → stamp (centers inset so stamps stay whole) →
  * crop inner tex. Do not center on crop edge — that slices rocks in half.
+ * Used for order-0 and order-1 atlases.
  */
-function bakeOrder1Cluster(brushes, rng) {
-  const finalSize = orderTexSize(1);
-  const stampPx = order1StampPx();
-  const pad = Math.ceil(stampPx / 2);
+function bakeStampCluster(brushes, rng, finalSize) {
+  const stamp = stampPx();
+  const pad = Math.ceil(stamp / 2);
   const work = finalSize + 2 * pad;
   const canvas = document.createElement("canvas");
   canvas.width = work;
@@ -280,7 +281,7 @@ function bakeOrder1Cluster(brushes, rng) {
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   ctx.clearRect(0, 0, work, work);
 
-  const stampR = stampPx / 2;
+  const stampR = stamp / 2;
   const inner0 = pad;
   const c0 = inner0 + stampR;
   const c1 = inner0 + finalSize - stampR;
@@ -289,7 +290,7 @@ function bakeOrder1Cluster(brushes, rng) {
     return Math.max(c0, Math.min(c1, v));
   }
 
-  stampRock(ctx, brushes, work / 2, work / 2, stampPx, rng);
+  stampRock(ctx, brushes, work / 2, work / 2, stamp, rng);
 
   const rim = [
     [0, 0],
@@ -300,14 +301,6 @@ function bakeOrder1Cluster(brushes, rng) {
     [0.5, 1],
     [0, 0.5],
     [1, 0.5],
-    [0.25, 0],
-    [0.75, 0],
-    [0.25, 1],
-    [0.75, 1],
-    [0, 0.25],
-    [0, 0.75],
-    [1, 0.25],
-    [1, 0.75],
   ];
   for (const [ux, uy] of rim) {
     stampRock(
@@ -315,24 +308,7 @@ function bakeOrder1Cluster(brushes, rng) {
       brushes,
       clampC(c0 + ux * (c1 - c0)),
       clampC(c0 + uy * (c1 - c0)),
-      stampPx,
-      rng,
-    );
-  }
-
-  const n = Math.max(
-    8,
-    Math.ceil(
-      ((finalSize * finalSize) / (stampPx * stampPx)) * ROCK_MUSH_DENSITY,
-    ),
-  );
-  for (let i = 0; i < n; i++) {
-    stampRock(
-      ctx,
-      brushes,
-      c0 + rng() * (c1 - c0),
-      c0 + rng() * (c1 - c0),
-      stampPx,
+      stamp,
       rng,
     );
   }
@@ -357,7 +333,7 @@ function bakeOrder1Cluster(brushes, rng) {
 }
 
 /**
- * 2× child composite. childVisualRatio 1.2 on order-2 bake mimics order-1
+ * 2× child composite. childVisualRatio on first composite mimics stamp-order
  * display overhang so quads seal; higher orders use 1.0 (fill already in child).
  * Recipe: [{ variant:0, rot }, ×4] index dy*2+dx.
  */
@@ -410,8 +386,8 @@ function bakeComposite(childCanvas, rng, childVisualRatio = 1) {
 }
 
 /**
- * Hierarchical mush bake: one tex per order 1..maxOrder.
- * Sizes: 128, 256, … 2048. Recipes store quadrant rots for shatter.
+ * Hierarchical mush bake: stamp clusters below COMPOSITE_MIN, then composites.
+ * Sizes: 64, 128, 256, … 2048. Recipes store quadrant rots for shatter (composites).
  *
  * @param {import('pixi.js').Texture[]} particleTextures
  * @param {{ maxOrder?: number, seed?: number }} [opts]
@@ -421,11 +397,22 @@ export function bakeRockMushTextures(particleTextures, opts = {}) {
   const maxOrder =
     opts.maxOrder != null ? opts.maxOrder : ROCK_MUSH_BAKE_MAX_ORDER;
   const seed = opts.seed != null ? opts.seed : ROCK_MUSH_SEED;
+  const compositeMin = ROCK_MUSH_COMPOSITE_MIN_ORDER;
   if (!particleTextures || !particleTextures.length) {
     throw new Error("rock mush: need rock particle textures");
   }
+  if (orderTexSize(0) !== ROCK_MUSH_MIN_TEX / 2) {
+    throw new Error(
+      "rock mush: orderTexSize(0) must equal ROCK_MUSH_MIN_TEX/2",
+    );
+  }
   if (orderTexSize(1) !== ROCK_MUSH_MIN_TEX) {
     throw new Error("rock mush: orderTexSize(1) must equal ROCK_MUSH_MIN_TEX");
+  }
+  if (compositeMin < 1 || compositeMin > maxOrder) {
+    throw new Error(
+      `rock mush: COMPOSITE_MIN_ORDER ${compositeMin} out of range 1..${maxOrder}`,
+    );
   }
 
   const brushes = particleTextures.map(prepareBrush);
@@ -435,16 +422,23 @@ export function bakeRockMushTextures(particleTextures, opts = {}) {
   /** @type {{ variant: number, rot: number }[][][]} */
   const recipes = [];
 
-  const rng1 = mulberry32(seed ^ 0x9e3779b9);
-  const canvas1 = bakeOrder1Cluster(brushes, rng1);
-  byOrder[1] = [canvasToTexture(canvas1)];
+  let childCanvas = null;
+  for (let order = 0; order < compositeMin; order++) {
+    const rng = mulberry32(
+      order === 0
+        ? seed ^ 0x9e3779b9
+        : seed ^ Math.imul(order, 0x9e3779b9),
+    );
+    childCanvas = bakeStampCluster(brushes, rng, orderTexSize(order));
+    byOrder[order] = [canvasToTexture(childCanvas)];
+  }
 
-  let childCanvas = canvas1;
-
-  for (let order = 2; order <= maxOrder; order++) {
+  for (let order = compositeMin; order <= maxOrder; order++) {
     const want = orderTexSize(order);
     const rng = mulberry32(seed ^ Math.imul(order, 0x9e3779b9));
-    const childVisualRatio = order === 2 ? ROCK_MUSH_VISUAL_RATIO : 1;
+    // Ratio on first composite (overhang of last stamp child); higher already baked in.
+    const childVisualRatio =
+      order === compositeMin ? ROCK_MUSH_VISUAL_RATIO : 1;
     const { canvas, recipe } = bakeComposite(
       childCanvas,
       rng,
@@ -461,8 +455,14 @@ export function bakeRockMushTextures(particleTextures, opts = {}) {
     childCanvas = canvas;
   }
 
-  if (!recipes[2] || !recipes[2][0] || recipes[2][0].length !== 4) {
-    throw new Error("rock mush: order-2 recipes missing or not length-4");
+  if (
+    !recipes[compositeMin] ||
+    !recipes[compositeMin][0] ||
+    recipes[compositeMin][0].length !== 4
+  ) {
+    throw new Error(
+      `rock mush: order-${compositeMin} recipes missing or not length-4`,
+    );
   }
 
   return { byOrder, recipes };

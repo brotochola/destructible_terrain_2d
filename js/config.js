@@ -4,13 +4,13 @@ export const W = window.innerWidth;
 export const H = window.innerHeight;
 export const ZOOM = 4;
 export const PTM = 10;
-/** Leaf scale; order-1 collider = P_D*2 = 40. */
+/** Leaf scale; order-0 collider = P_D = 20; order-1 = P_D*2 = 40. */
 export const P_D = 20;
-export const SHATTER_BALL_RADIUS = P_D / 4;
+export const SHATTER_BALL_RADIUS = P_D / 5;
 export const px2m = (px) => px / PTM;
 export const m2px = (m) => m * PTM;
 
-/** Side length in px for an order-N mamushka (leaf side = P_D when N=0 conceptually; shatter at N=1). */
+/** Side length in px for an order-N mamushka (leaf = order 0; shatter at N=0). */
 export function orderSize(n) {
   return P_D * 2 ** n;
 }
@@ -29,20 +29,22 @@ export const ROCK_PARTICLE_VISUAL = SHATTER_BALL_RADIUS * 2 * 1.3;
  * Overflow / ratio stay tied to this so doubling bake tex does not enlarge sprites.
  */
 export const ROCK_MUSH_WORLD_VISUAL = 64;
-/** Order-1 bake tex side (px). Higher orders = this * 2^(n-1). */
+/** Order-1 bake tex side (px). Order-0 = this/2; higher = this * 2^(n-1). */
 export const ROCK_MUSH_MIN_TEX = 128;
 /** Highest order with its own baked atlas (128→2048). */
-export const ROCK_MUSH_BAKE_MAX_ORDER = 4;
+export const ROCK_MUSH_BAKE_MAX_ORDER = 5;
 export const ROCK_MUSH_SEED = 1212;
+/** First order baked as 2× child composite (orders below = stamp clusters). */
+export const ROCK_MUSH_COMPOSITE_MIN_ORDER = 5;
 /** Stamp density for order-1 cluster bake. */
 export const ROCK_MUSH_DENSITY = 1;
 
-/** Texture side for baked order n (1..BAKE_MAX): 128, 256, … 2048. */
+/** Texture side for baked order n (0..BAKE_MAX): 64, 128, 256, … 2048. */
 export function orderTexSize(n) {
   return ROCK_MUSH_MIN_TEX * 2 ** (n - 1);
 }
 
-/** Visual / collider scale for order-1 (world neighbors + baked into order-2 atlas). */
+/** Visual / collider scale for stamp orders (world neighbors + baked into first composite). */
 export const ROCK_MUSH_VISUAL_RATIO = 1.2; //ROCK_MUSH_WORLD_VISUAL / orderSize(1);
 
 /** Visual overflow (world px) for a collider of `boxSize`. */
@@ -50,9 +52,10 @@ export function rockMushOverflow(boxSize, order = 1) {
   return (rockMushVisualSize(boxSize, order) - boxSize) / 2;
 }
 
-/** Visual sprite side. Order-1 uses ratio; order≥2 = collider (ratio baked into atlas). */
+/** Visual sprite side. Stamp orders use ratio; composites = collider (ratio baked in). */
 export function rockMushVisualSize(boxSize, order = 1) {
-  if (order <= 1) return boxSize * ROCK_MUSH_VISUAL_RATIO;
+  if (order < ROCK_MUSH_COMPOSITE_MIN_ORDER)
+    return boxSize * ROCK_MUSH_VISUAL_RATIO;
   return boxSize;
 }
 
@@ -125,10 +128,13 @@ export const JUMP_SPEED = px2m(220);
 export const FAST_FALL_IMPULSE = px2m(8);
 export const LASER_RANGE = px2m(800);
 export const LASER_FLASH_MS = 100;
-export const LASER_COOLDOWN_MS = 111;
+/** Runtime-tunable laser settings (UI mutates fields). */
+export const laserTunables = {
+  cooldownMs: 111,
+};
 
-/** Balls spawned when an order-1 box shatters. */
-export const SHATTER_BALL_COUNT = 9;
+/** Balls spawned when an order-0 box shatters. */
+export const SHATTER_BALL_COUNT = 4;
 /** Impulse magnitude range (px-equivalent) applied to each shatter ball. */
 export const SHATTER_KICK_MIN = 20;
 export const SHATTER_KICK_MAX = 80;

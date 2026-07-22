@@ -4,9 +4,9 @@ import {
   CAT_PARTICLE,
   CAT_WALL,
   H,
-  LASER_COOLDOWN_MS,
   LASER_FLASH_MS,
   LASER_RANGE,
+  laserTunables,
   PHYS_H,
   PHYS_W,
   SOLVER_BUSY_DYNAMIC_COUNT,
@@ -296,7 +296,7 @@ export class Game {
     if (!byOrder) return;
 
     orderSel.replaceChildren();
-    for (let o = 1; o < byOrder.length; o++) {
+    for (let o = 0; o < byOrder.length; o++) {
       const list = byOrder[o];
       if (!list || !list.length) continue;
       const opt = document.createElement("option");
@@ -308,7 +308,7 @@ export class Game {
 
     const renderGallery = () => {
       gallery.replaceChildren();
-      const order = Number(orderSel.value) || 1;
+      const order = Number(orderSel.value) || 0;
       const variants = byOrder[order] || [];
       for (let i = 0; i < variants.length; i++) {
         const fig = document.createElement("figure");
@@ -368,6 +368,19 @@ export class Game {
     });
     bindNum(settleEl, "settleFrames", { min: 0, max: 600 });
     bindNum(ageEl, "maxAgeMs", { min: 0, max: 120000 });
+
+    const laserCdEl = document.getElementById("laser-cooldown");
+    if (laserCdEl) {
+      laserCdEl.value = String(laserTunables.cooldownMs);
+      const applyLaserCd = () => {
+        let n = Number(laserCdEl.value);
+        if (!Number.isFinite(n)) n = laserTunables.cooldownMs;
+        n = Math.max(0, Math.min(5000, n | 0));
+        laserCdEl.value = String(n);
+        laserTunables.cooldownMs = n;
+      };
+      laserCdEl.addEventListener("change", applyLaserCd);
+    }
   }
 
   spawnCharacter() {
@@ -506,7 +519,7 @@ export class Game {
 
     this.worldMs.begin();
     if (this.character) this.character.update(this.keys);
-    if (this.firing && t - this.lastFireAt >= LASER_COOLDOWN_MS) {
+    if (this.firing && t - this.lastFireAt >= laserTunables.cooldownMs) {
       this.fireLaser();
       this.lastFireAt = t;
     }

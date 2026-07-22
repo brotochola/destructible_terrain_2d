@@ -95,7 +95,7 @@ function faceNeighbors(intact, rootId, order, gx, gy, dx, dy) {
   const cover = findCovering(intact, rootId, order, ngx, ngy);
   if (cover) return [cover];
 
-  if (order <= 1) return [];
+  if (order <= 0) return [];
   const out = [];
   for (const [cx, cy] of edgeChildCoords(ngx, ngy, dx, dy)) {
     out.push(...gatherEdgeLeaves(intact, rootId, order - 1, cx, cy, dx, dy));
@@ -361,7 +361,7 @@ export class Terrain {
     const parentMushVariant = node.mushVariant;
     const parentTexRot = node.texRot || 0;
     const rootId = node.rootId;
-    const shatter = parentOrder === 1;
+    const shatter = parentOrder === 0;
     node.destroy();
     this.intact.delete(nodeKey(node));
 
