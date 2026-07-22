@@ -24,7 +24,11 @@ export class GameObject {
   destroy() {
     if (this.gfx) {
       // Shared rock texture must survive per-box teardown.
-      this.gfx.destroy({ texture: false, textureSource: false });
+      this.gfx.destroy({
+        children: true,
+        texture: false,
+        textureSource: false,
+      });
       this.gfx = null;
     }
     if (!this.body) return;

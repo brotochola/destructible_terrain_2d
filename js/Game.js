@@ -59,6 +59,10 @@ export class Game {
     this.statWorldMs = document.getElementById("stat-world-ms");
     this.statRenderMs = document.getElementById("stat-render-ms");
     this.statFps = document.getElementById("stat-fps");
+    this.statJoints = document.getElementById("stat-joints");
+    this.debugPhys = false;
+    this.debugCheckbox = document.getElementById("debug-phys");
+    this.debugLegend = document.getElementById("debug-legend");
   }
 
   async init() {
@@ -189,6 +193,17 @@ export class Game {
 
     window.addEventListener("keydown", (e) => {
       this.keys[e.code] = true;
+      if (e.code === "F3") {
+        e.preventDefault();
+        this.debugPhys = !this.debugPhys;
+        if (this.debugCheckbox) this.debugCheckbox.checked = this.debugPhys;
+        if (this.debugLegend) this.debugLegend.hidden = !this.debugPhys;
+        if (!this.debugPhys) {
+          this.renderer.clearDebug();
+          if (this.statJoints) this.statJoints.textContent = "0";
+        }
+        return;
+      }
       if (
         [
           "KeyW",
@@ -218,6 +233,17 @@ export class Game {
     document
       .getElementById("reset")
       .addEventListener("click", () => this.reset());
+
+    if (this.debugCheckbox) {
+      this.debugCheckbox.addEventListener("change", () => {
+        this.debugPhys = this.debugCheckbox.checked;
+        if (this.debugLegend) this.debugLegend.hidden = !this.debugPhys;
+        if (!this.debugPhys) {
+          this.renderer.clearDebug();
+          if (this.statJoints) this.statJoints.textContent = "0";
+        }
+      });
+    }
   }
 
   spawnCharacter() {
@@ -300,6 +326,10 @@ export class Game {
     this.terrain.syncGfx(this.camera.viewBounds(VIEW_CULL_MARGIN_PX));
     this.renderer.drawLasers(this.lasers, vs);
     if (this.character) this.character.syncGfx(view);
+    if (this.debugPhys) {
+      const n = this.renderer.drawDebug(this.world, vs);
+      if (this.statJoints) this.statJoints.textContent = String(n);
+    }
     this.renderer.render();
 
     this.statIntact.textContent = this.terrain.intact.size;
@@ -328,12 +358,12 @@ export class Game {
       this.fireLaser();
       this.lastFireAt = t;
     }
-    const dyn = this.terrain.dynamicCount();
-    if (dyn < SOLVER_BUSY_DYNAMIC_COUNT) {
-      this.world.step(1 / 60, 5, 2);
-    } else {
-      this.world.step(1 / 60, 4, 1);
-    }
+    // const dyn = this.terrain.dynamicCount();
+    // if (dyn < SOLVER_BUSY_DYNAMIC_COUNT) {
+    this.world.step(1 / 60, 5, 5);
+    // } else {
+    // this.world.step(1 / 60, 4, 1);
+    // }
     this.terrain.cullParticles(t);
     this.terrain.coalesceQuiet(this.camera.viewBounds(VIEW_CULL_MARGIN_PX));
     this.updateLasers(t);

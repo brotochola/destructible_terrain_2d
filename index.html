@@ -15,6 +15,16 @@
   Cámara sigue al personaje<br>
   Nodos vivos: <span id="stat-intact">0</span> · Partículas libres: <span id="stat-free">0</span> · Dinámicos: <span id="stat-bodies">0</span><br>
   World: <span id="stat-world-ms">0</span> ms · Render: <span id="stat-render-ms">0</span> ms · FPS: <span id="stat-fps">0</span><br>
+  Joints: <span id="stat-joints">0</span>
+  <label class="dbg"><input type="checkbox" id="debug-phys"> Debug physics</label><br>
+  <span id="debug-legend" class="legend" hidden>
+    <span class="swatch" style="--c:#6af"></span> static
+    <span class="swatch" style="--c:#fa6"></span> dynamic
+    <span class="swatch" style="--c:#f66"></span> particle
+    <span class="swatch" style="--c:#6f6"></span> character
+    <span class="swatch" style="--c:#888"></span> wall
+    <span class="swatch" style="--c:#ff0"></span> joint
+  </span>
   <button id="reset">Reset</button>
 </div>
 <div id="zoomctl">

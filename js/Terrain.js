@@ -13,16 +13,94 @@ import {
   pl,
   px2m,
   terrainTop,
-} from './config.js';
-import { Box } from './Box.js';
-import { CirclePiece, ParticlePool } from './CirclePiece.js';
+} from "./config.js";
+import { Box } from "./Box.js";
+import { CirclePiece, ParticlePool } from "./CirclePiece.js";
 
 function nodeKey(box) {
-  return box.rootId + '_' + box.order + '_' + box.gx + '_' + box.gy;
+  return box.rootId + "_" + box.order + "_" + box.gx + "_" + box.gy;
 }
 
 function keyAt(rootId, order, gx, gy) {
-  return rootId + '_' + order + '_' + gx + '_' + gy;
+  return rootId + "_" + order + "_" + gx + "_" + gy;
+}
+
+/** Largest root order in layout — coarser walk ceiling. */
+const MAX_MAMUSHKA_ORDER = Math.max(...LEVEL_LAYOUT.map((i) => i.order));
+
+/** Intact box covering cell (order, gx, gy), or null. Walks parents if subdivided away. */
+function findCovering(intact, rootId, order, gx, gy) {
+  let o = order;
+  let x = gx;
+  let y = gy;
+  while (o <= MAX_MAMUSHKA_ORDER) {
+    const box = intact.get(keyAt(rootId, o, x, y));
+    if (box) return box;
+    x >>= 1;
+    y >>= 1;
+    o++;
+  }
+  return null;
+}
+
+/**
+ * Two child cells of (gx, gy) on the face toward the opposite of (dx, dy).
+ * Search east (dx=1) → neighbor's west children, etc.
+ */
+function edgeChildCoords(gx, gy, dx, dy) {
+  const bx = gx * 2;
+  const by = gy * 2;
+  if (dx === 1)
+    return [
+      [bx, by],
+      [bx, by + 1],
+    ];
+  if (dx === -1)
+    return [
+      [bx + 1, by],
+      [bx + 1, by + 1],
+    ];
+  if (dy === 1)
+    return [
+      [bx, by],
+      [bx + 1, by],
+    ];
+  return [
+    [bx, by + 1],
+    [bx + 1, by + 1],
+  ];
+}
+
+/** Intact leaves inside cell (o,gx,gy) that lie on the shared face for search dir (dx,dy). */
+function gatherEdgeLeaves(intact, rootId, o, gx, gy, dx, dy) {
+  const box = intact.get(keyAt(rootId, o, gx, gy));
+  if (box) return [box];
+  if (o <= 1) return [];
+  const out = [];
+  for (const [cx, cy] of edgeChildCoords(gx, gy, dx, dy)) {
+    out.push(...gatherEdgeLeaves(intact, rootId, o - 1, cx, cy, dx, dy));
+  }
+  return out;
+}
+
+/**
+ * Same-root face neighbors of cell (order, gx, gy) in cardinal (dx, dy).
+ * Exact → coarser cover → finer edge leaves.
+ */
+function faceNeighbors(intact, rootId, order, gx, gy, dx, dy) {
+  const ngx = gx + dx;
+  const ngy = gy + dy;
+  if (ngx < 0 || ngy < 0) return [];
+
+  const cover = findCovering(intact, rootId, order, ngx, ngy);
+  if (cover) return [cover];
+
+  if (order <= 1) return [];
+  const out = [];
+  for (const [cx, cy] of edgeChildCoords(ngx, ngy, dx, dy)) {
+    out.push(...gatherEdgeLeaves(intact, rootId, order - 1, cx, cy, dx, dy));
+  }
+  return out;
 }
 
 /** Axis-aligned bounds from current body center (ignores rotation). */
@@ -61,7 +139,9 @@ function weldBoxes(world, a, b) {
       localAnchorA: a.body.getLocalPoint(worldPt),
       localAnchorB: b.body.getLocalPoint(worldPt),
       referenceAngle: b.body.getAngle() - a.body.getAngle(),
-    })
+      frequencyHz: 0, // hard angular constraint
+      dampingRatio: 0,
+    }),
   );
 }
 
@@ -119,7 +199,7 @@ export class Terrain {
     this.particlePool = new ParticlePool(
       world,
       this.particleLayer,
-      this.particleTextures
+      this.particleTextures,
     );
     this._nextRootId = 0;
     this._coalesceCursor = 0;
@@ -131,20 +211,112 @@ export class Terrain {
 
   weldToNeighbors(box) {
     for (const [dx, dy] of NEIGHBOR_DIRS) {
-      const other = this.intact.get(keyAt(box.rootId, box.order, box.gx + dx, box.gy + dy));
-      if (!other || !other.isDynamic || other === box) continue;
-      weldBoxes(this.world, box, other);
+      for (const other of faceNeighbors(
+        this.intact,
+        box.rootId,
+        box.order,
+        box.gx,
+        box.gy,
+        dx,
+        dy,
+      )) {
+        if (other === box) continue;
+        if (!box.isDynamic && !other.isDynamic) continue;
+        weldBoxes(this.world, box, other);
+      }
     }
-    // Cross-order / odd edges: only scan other dynamics (small set).
-    for (const other of this.dynamicIntact) {
-      if (other === box) continue;
-      if (other.rootId === box.rootId && other.order === box.order) continue;
+    // Cross-root layout seams (gx/gy not shared across rootId).
+    for (const other of this.intact.values()) {
+      if (other === box || other.rootId === box.rootId) continue;
+      if (!box.isDynamic && !other.isDynamic) continue;
       if (!boxesTouch(box, other, BOX_TOUCH_EPS_PX)) continue;
       weldBoxes(this.world, box, other);
     }
   }
 
-  createNode(order, x, y, gx, gy, rootId, angle = 0, velocity = null) {
+  /** True if no intact neighbor covers this cardinal face (incl. cross-root touch). */
+  isFaceExposed(box, dx, dy) {
+    if (
+      faceNeighbors(this.intact, box.rootId, box.order, box.gx, box.gy, dx, dy)
+        .length
+    ) {
+      return false;
+    }
+    const A = aabbOf(box);
+    const eps = BOX_TOUCH_EPS_PX;
+    for (const other of this.intact.values()) {
+      if (other === box || other.rootId === box.rootId) continue;
+      if (!boxesTouch(box, other, eps)) continue;
+      const B = aabbOf(other);
+      if (dx === 1 && B.x + eps >= A.x + A.size) return false;
+      if (dx === -1 && B.x + B.size <= A.x + eps) return false;
+      if (dy === 1 && B.y + eps >= A.y + A.size) return false;
+      if (dy === -1 && B.y + B.size <= A.y + eps) return false;
+    }
+    return true;
+  }
+
+  refreshRockEdges(box) {
+    if (!box || !box.applyRockSilhouette) return;
+    box.applyRockSilhouette({
+      right: this.isFaceExposed(box, 1, 0),
+      left: this.isFaceExposed(box, -1, 0),
+      bottom: this.isFaceExposed(box, 0, 1),
+      top: this.isFaceExposed(box, 0, -1),
+    });
+  }
+
+  refreshNeighborRockEdges(box) {
+    for (const [dx, dy] of NEIGHBOR_DIRS) {
+      for (const n of faceNeighbors(
+        this.intact,
+        box.rootId,
+        box.order,
+        box.gx,
+        box.gy,
+        dx,
+        dy,
+      )) {
+        this.refreshRockEdges(n);
+      }
+    }
+    for (const other of this.intact.values()) {
+      if (other === box || other.rootId === box.rootId) continue;
+      if (!boxesTouch(box, other, BOX_TOUCH_EPS_PX)) continue;
+      this.refreshRockEdges(other);
+    }
+  }
+
+  /** Neighbors that share a face — refresh after this node is removed. */
+  collectTouching(box) {
+    const out = [];
+    const seen = new Set();
+    for (const [dx, dy] of NEIGHBOR_DIRS) {
+      for (const n of faceNeighbors(
+        this.intact,
+        box.rootId,
+        box.order,
+        box.gx,
+        box.gy,
+        dx,
+        dy,
+      )) {
+        if (n === box || seen.has(n)) continue;
+        seen.add(n);
+        out.push(n);
+      }
+    }
+    for (const other of this.intact.values()) {
+      if (other === box || other.rootId === box.rootId || seen.has(other))
+        continue;
+      if (!boxesTouch(box, other, BOX_TOUCH_EPS_PX)) continue;
+      seen.add(other);
+      out.push(other);
+    }
+    return out;
+  }
+
+  createNode(order, x, y, gx, gy, rootId, angle = 0, velocity = null, visual = null) {
     const box = new Box(
       this.world,
       order,
@@ -155,17 +327,18 @@ export class Terrain {
       rootId,
       this.boxLayer,
       angle,
-      this.rockTexture
+      this.rockTexture,
+      visual,
     );
     if (velocity && box.isDynamic && box.body) {
       box.body.setLinearVelocity(Vec2(velocity.vx, velocity.vy));
       box.body.setAngularVelocity(velocity.omega);
     }
     this.intact.set(nodeKey(box), box);
-    if (box.isDynamic) {
-      this.dynamicIntact.add(box);
-      this.weldToNeighbors(box);
-    }
+    if (box.isDynamic) this.dynamicIntact.add(box);
+    this.weldToNeighbors(box);
+    this.refreshRockEdges(box);
+    this.refreshNeighborRockEdges(box);
     return box;
   }
 
@@ -215,17 +388,31 @@ export class Terrain {
     if (!this.intact.has(nodeKey(node))) return;
 
     const pose = readPose(node);
+    const around = this.collectTouching(node);
 
     this.dynamicIntact.delete(node);
+    // Snapshot visual before destroy — children inherit tile UV + edge seed/layout.
+    const parentVisual = {
+      tilePosX: node.tilePosX,
+      tilePosY: node.tilePosY,
+      layoutX: node.layoutX,
+      layoutY: node.layoutY,
+      edgeSeed: node.edgeSeed,
+      size: node.size,
+    };
     node.destroy();
     this.intact.delete(nodeKey(node));
 
     if (node.order === 1) {
       this.shatterToParticles(node, pose);
+      for (const n of around) {
+        if (this.intact.has(nodeKey(n))) this.refreshRockEdges(n);
+      }
       return;
     }
 
     const childOrder = node.order - 1;
+    const childSize = parentVisual.size / 2;
     const velocity = {
       vx: pose.vx,
       vy: pose.vy,
@@ -234,7 +421,14 @@ export class Terrain {
     // One subdivision level per laser hit (no recurse to leaf).
     for (let dx = 0; dx < 2; dx++) {
       for (let dy = 0; dy < 2; dy++) {
-        const place = childPlacement(pose, node.size, dx, dy);
+        const place = childPlacement(pose, parentVisual.size, dx, dy);
+        const visual = {
+          tilePosX: parentVisual.tilePosX - dx * childSize,
+          tilePosY: parentVisual.tilePosY - dy * childSize,
+          layoutX: parentVisual.layoutX + dx * childSize,
+          layoutY: parentVisual.layoutY + dy * childSize,
+          edgeSeed: parentVisual.edgeSeed,
+        };
         this.createNode(
           childOrder,
           place.x,
@@ -243,9 +437,13 @@ export class Terrain {
           node.gy * 2 + dy,
           node.rootId,
           pose.angle,
-          velocity
+          velocity,
+          visual,
         );
       }
+    }
+    for (const n of around) {
+      if (this.intact.has(nodeKey(n))) this.refreshRockEdges(n);
     }
   }
 
@@ -262,7 +460,12 @@ export class Terrain {
     if (!b || !c || !d) return false;
     if (b.isDynamic || c.isDynamic || d.isDynamic) return false;
     // Static mamushka cells stay axis-aligned; skip if any drifted somehow.
-    if (a.body.getAngle() || b.body.getAngle() || c.body.getAngle() || d.body.getAngle()) {
+    if (
+      a.body.getAngle() ||
+      b.body.getAngle() ||
+      c.body.getAngle() ||
+      d.body.getAngle()
+    ) {
       return false;
     }
 
@@ -271,6 +474,7 @@ export class Terrain {
     const parentGy = gy >> 1;
     const parentX = a.x;
     const parentY = a.y;
+    const visual = a.visualAsParent();
 
     for (const sib of [a, b, c, d]) {
       this.dynamicIntact.delete(sib);
@@ -278,7 +482,17 @@ export class Terrain {
       sib.destroy();
     }
 
-    this.createNode(parentOrder, parentX, parentY, parentGx, parentGy, rootId, 0);
+    this.createNode(
+      parentOrder,
+      parentX,
+      parentY,
+      parentGx,
+      parentGy,
+      rootId,
+      0,
+      null,
+      visual,
+    );
     return true;
   }
 
@@ -293,11 +507,7 @@ export class Terrain {
 
     for (const box of this.intact.values()) {
       if (idx++ < start) continue;
-      if (
-        !box.isDynamic &&
-        (box.gx & 1) === 0 &&
-        (box.gy & 1) === 0
-      ) {
+      if (!box.isDynamic && (box.gx & 1) === 0 && (box.gy & 1) === 0) {
         const parentSize = box.size * 2;
         const x0 = box.x;
         const y0 = box.y;
@@ -368,7 +578,7 @@ export class Terrain {
     for (const piece of this.freeParticles) {
       piece.syncGfx(viewBounds);
     }
-    if (this.particleLayer && typeof this.particleLayer.update === 'function') {
+    if (this.particleLayer && typeof this.particleLayer.update === "function") {
       this.particleLayer.update();
     }
   }

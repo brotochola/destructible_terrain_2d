@@ -20,6 +20,16 @@ export const ROCK_TILE_SCALE = 0.25;
 export const ROCK_TINT = 0xc4a574;
 /** Shatter bolita sprites (scaled down to SHATTER_BALL diameter). */
 export const ROCK_PARTICLE_URLS = ["assets/rock1.png", "assets/rock2.png"];
+/** Exposed-edge rocky silhouette (visual only; physics stay AABB). */
+/** World/layout px inset amplitude — fixed so splits keep same chew. */
+export const ROCK_EDGE_AMP = 2.5;
+/** Noise cell size (layout px); bilinear across cells = soft waves. */
+export const ROCK_EDGE_STEP = 6;
+/** Vertices per noise cell along an edge (denser = rounder polyline). */
+export const ROCK_EDGE_SAMPLES_PER_STEP = 3;
+export const ROCK_EDGE_STROKE = 0x2a2118;
+export const ROCK_EDGE_STROKE_WIDTH_FRAC = 0.02;
+export const ROCK_EDGE_STROKE_WIDTH_MAX = 2;
 
 /**
  * Root boxes in layout-local px (added to originX / terrainTop).
