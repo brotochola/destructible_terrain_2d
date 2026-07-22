@@ -124,6 +124,43 @@ function boxesTouch(a, b, eps) {
   );
 }
 
+/** Interval along shared face (layout px). Horizontal faces → X; vertical → Y. */
+function edgeAlongInterval(box, dx, dy) {
+  if (dx !== 0) {
+    return { a0: box.layoutY, a1: box.layoutY + box.size };
+  }
+  return { a0: box.layoutX, a1: box.layoutX + box.size };
+}
+
+function mergeIntervals(intervals, eps) {
+  if (!intervals.length) return [];
+  const sorted = intervals.slice().sort((u, v) => u.a0 - v.a0);
+  const out = [{ a0: sorted[0].a0, a1: sorted[0].a1 }];
+  for (let i = 1; i < sorted.length; i++) {
+    const iv = sorted[i];
+    const last = out[out.length - 1];
+    if (iv.a0 <= last.a1 + eps) last.a1 = Math.max(last.a1, iv.a1);
+    else out.push({ a0: iv.a0, a1: iv.a1 });
+  }
+  return out;
+}
+
+/** Gaps on [a0,a1] not covered by `covered` intervals. */
+function uncoveredGaps(a0, a1, covered, eps) {
+  const merged = mergeIntervals(covered, eps);
+  const gaps = [];
+  let cur = a0;
+  for (const iv of merged) {
+    const lo = Math.max(iv.a0, a0);
+    const hi = Math.min(iv.a1, a1);
+    if (hi <= lo + eps) continue;
+    if (lo > cur + eps) gaps.push({ a0: cur, a1: Math.min(lo, a1) });
+    cur = Math.max(cur, hi);
+  }
+  if (cur < a1 - eps) gaps.push({ a0: cur, a1: a1 });
+  return gaps;
+}
+
 function weldBoxes(world, a, b) {
   const A = aabbOf(a);
   const B = aabbOf(b);
@@ -234,35 +271,54 @@ export class Terrain {
     }
   }
 
-  /** True if no intact neighbor covers this cardinal face (incl. cross-root touch). */
-  isFaceExposed(box, dx, dy) {
-    if (
-      faceNeighbors(this.intact, box.rootId, box.order, box.gx, box.gy, dx, dy)
-        .length
-    ) {
-      return false;
-    }
-    const A = aabbOf(box);
+  /**
+   * Uncovered layout intervals on a face. Empty = fully sealed (flush, no stroke).
+   * Partial dig → only the hole segments jag/stroke (no runaway full-edge lines).
+   */
+  getFaceGaps(box, dx, dy) {
+    const target = edgeAlongInterval(box, dx, dy);
     const eps = BOX_TOUCH_EPS_PX;
+    const covered = [];
+
+    const neighbors = faceNeighbors(
+      this.intact,
+      box.rootId,
+      box.order,
+      box.gx,
+      box.gy,
+      dx,
+      dy
+    );
+    for (const n of neighbors) {
+      if (n.order >= box.order) return [];
+      covered.push(edgeAlongInterval(n, dx, dy));
+    }
+
+    const A = aabbOf(box);
     for (const other of this.intact.values()) {
       if (other === box || other.rootId === box.rootId) continue;
       if (!boxesTouch(box, other, eps)) continue;
       const B = aabbOf(other);
-      if (dx === 1 && B.x + eps >= A.x + A.size) return false;
-      if (dx === -1 && B.x + B.size <= A.x + eps) return false;
-      if (dy === 1 && B.y + eps >= A.y + A.size) return false;
-      if (dy === -1 && B.y + B.size <= A.y + eps) return false;
+      let onFace = false;
+      if (dx === 1 && B.x + eps >= A.x + A.size) onFace = true;
+      if (dx === -1 && B.x + B.size <= A.x + eps) onFace = true;
+      if (dy === 1 && B.y + eps >= A.y + A.size) onFace = true;
+      if (dy === -1 && B.y + B.size <= A.y + eps) onFace = true;
+      if (!onFace) continue;
+      if (other.order >= box.order) return [];
+      covered.push(edgeAlongInterval(other, dx, dy));
     }
-    return true;
+
+    return uncoveredGaps(target.a0, target.a1, covered, eps);
   }
 
   refreshRockEdges(box) {
     if (!box || !box.applyRockSilhouette) return;
     box.applyRockSilhouette({
-      right: this.isFaceExposed(box, 1, 0),
-      left: this.isFaceExposed(box, -1, 0),
-      bottom: this.isFaceExposed(box, 0, 1),
-      top: this.isFaceExposed(box, 0, -1),
+      right: this.getFaceGaps(box, 1, 0),
+      left: this.getFaceGaps(box, -1, 0),
+      bottom: this.getFaceGaps(box, 0, 1),
+      top: this.getFaceGaps(box, 0, -1),
     });
   }
 

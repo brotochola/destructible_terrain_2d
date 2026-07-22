@@ -23,10 +23,14 @@ export const ROCK_PARTICLE_URLS = ["assets/rock1.png", "assets/rock2.png"];
 /** Exposed-edge rocky silhouette (visual only; physics stay AABB). */
 /** World/layout px inset amplitude — fixed so splits keep same chew. */
 export const ROCK_EDGE_AMP = 2.5;
+/** Second octave amp (finer detail, less repetitive waves). */
+export const ROCK_EDGE_AMP2 = 1.1;
 /** Noise cell size (layout px); bilinear across cells = soft waves. */
 export const ROCK_EDGE_STEP = 6;
 /** Vertices per noise cell along an edge (denser = rounder polyline). */
 export const ROCK_EDGE_SAMPLES_PER_STEP = 3;
+/** Push stroke slightly into the void so ceilings/floors both read. */
+export const ROCK_EDGE_STROKE_OUTSET = 0.45;
 export const ROCK_EDGE_STROKE = 0x2a2118;
 export const ROCK_EDGE_STROKE_WIDTH_FRAC = 0.02;
 export const ROCK_EDGE_STROKE_WIDTH_MAX = 2;
@@ -35,17 +39,10 @@ export const ROCK_EDGE_STROKE_WIDTH_MAX = 2;
  * Root boxes in layout-local px (added to originX / terrainTop).
  * order N → size P_D*2^N, full shatter → (2^N)^2 bolitas.
  */
+const max_order = 7;
 export const LEVEL_LAYOUT = [
-  { order: 7, x: 0, y: 0 },
-  { order: 7, x: orderSize(7), y: 100 },
-  { order: 7, x: orderSize(7) * 2, y: 200 },
-  { order: 7, x: orderSize(7) * 3, y: 300 },
-  { order: 7, x: orderSize(7) * 4, y: 400 },
-  { order: 7, x: orderSize(7) * 5, y: 500 },
-  { order: 7, x: orderSize(7) * 6, y: 600 },
-  { order: 7, x: orderSize(7) * 7, y: 700 },
-  { order: 7, x: orderSize(7) * 8, y: 800 },
-  { order: 7, x: orderSize(7) * 9, y: 900 },
+  { order: max_order, x: 0, y: 0 },
+  { order: max_order, x: orderSize(max_order), y: 50 },
 ];
 
 function layoutBounds(layout) {

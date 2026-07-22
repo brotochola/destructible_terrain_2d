@@ -10,9 +10,11 @@ import {
   CAT_WALL,
   DYNAMIC_MAX_ORDER,
   ROCK_EDGE_AMP,
+  ROCK_EDGE_AMP2,
   ROCK_EDGE_SAMPLES_PER_STEP,
   ROCK_EDGE_STEP,
   ROCK_EDGE_STROKE,
+  ROCK_EDGE_STROKE_OUTSET,
   ROCK_EDGE_STROKE_WIDTH_FRAC,
   ROCK_EDGE_STROKE_WIDTH_MAX,
   ROCK_TILE_SCALE,
@@ -53,25 +55,34 @@ function soft01(t) {
   return t * t * (3 - 2 * t);
 }
 
-/**
- * Soft inset from layout-space position.
- * Bilinear + smoothstep between hash cells — correlated along edge, stable on split.
- */
-function edgeInset(edgeSeed, layoutX, layoutY) {
-  const gx = layoutX / ROCK_EDGE_STEP;
-  const gy = layoutY / ROCK_EDGE_STEP;
+/** Bilinear value noise at layout cell scale. */
+function valueNoise2(seed, layoutX, layoutY, step) {
+  const gx = layoutX / step;
+  const gy = layoutY / step;
   const x0 = Math.floor(gx);
   const y0 = Math.floor(gy);
   const fx = soft01(gx - x0);
   const fy = soft01(gy - y0);
-  const v00 = hash01(edgeSeed, x0, y0);
-  const v10 = hash01(edgeSeed, x0 + 1, y0);
-  const v01 = hash01(edgeSeed, x0, y0 + 1);
-  const v11 = hash01(edgeSeed, x0 + 1, y0 + 1);
+  const v00 = hash01(seed, x0, y0);
+  const v10 = hash01(seed, x0 + 1, y0);
+  const v01 = hash01(seed, x0, y0 + 1);
+  const v11 = hash01(seed, x0 + 1, y0 + 1);
   const v0 = v00 + (v10 - v00) * fx;
   const v1 = v01 + (v11 - v01) * fx;
-  const v = v0 + (v1 - v0) * fy;
-  return ROCK_EDGE_AMP * (0.25 + 0.75 * v);
+  return v0 + (v1 - v0) * fy;
+}
+
+/**
+ * Soft inset from layout-space position (2 octaves).
+ * Axis salt so floors/ceilings ≠ copy of walls. Stable across splits.
+ */
+function edgeInset(edgeSeed, layoutX, layoutY, axisSalt = 0) {
+  const seed = (edgeSeed ^ Math.imul(axisSalt, 0x9e3779b9)) | 0;
+  const n1 = valueNoise2(seed, layoutX, layoutY, ROCK_EDGE_STEP);
+  const n2 = valueNoise2(seed ^ 0x85ebca6b, layoutX, layoutY, ROCK_EDGE_STEP / 3);
+  return (
+    ROCK_EDGE_AMP * (0.25 + 0.75 * n1) + ROCK_EDGE_AMP2 * (0.25 + 0.75 * n2)
+  );
 }
 
 function edgeSegCount(size) {
@@ -79,34 +90,70 @@ function edgeSegCount(size) {
   return Math.max(4, Math.ceil((size / ROCK_EDGE_STEP) * per));
 }
 
+/** axisSalt: 1 = horizontal edge, 2 = vertical edge. */
+function axisSaltForEdge(e) {
+  return e.iy !== 0 ? 1 : 2;
+}
+
+/** Layout-along coordinate at parametric t on edge (0→1 along draw direction). */
+function alongAtT(e, t, layoutX, layoutY, size) {
+  if (e.iy === 1) return layoutX + t * size; // top L→R
+  if (e.ix === -1) return layoutY + t * size; // right T→B
+  if (e.iy === -1) return layoutX + (1 - t) * size; // bottom R→L
+  return layoutY + (1 - t) * size; // left B→T
+}
+
+function tForAlong(e, along, layoutX, layoutY, size) {
+  if (size <= 0) return 0;
+  if (e.iy === 1) return (along - layoutX) / size;
+  if (e.ix === -1) return (along - layoutY) / size;
+  if (e.iy === -1) return 1 - (along - layoutX) / size;
+  return 1 - (along - layoutY) / size;
+}
+
+function inGaps(along, gaps, eps = 0.5) {
+  if (!gaps || !gaps.length) return false;
+  for (const g of gaps) {
+    if (along >= g.a0 - eps && along <= g.a1 + eps) return true;
+  }
+  return false;
+}
+
+function edgeDefs(half) {
+  return [
+    { key: 'top', x0: -half, y0: -half, x1: half, y1: -half, ix: 0, iy: 1 },
+    { key: 'right', x0: half, y0: -half, x1: half, y1: half, ix: -1, iy: 0 },
+    { key: 'bottom', x0: half, y0: half, x1: -half, y1: half, ix: 0, iy: -1 },
+    { key: 'left', x0: -half, y0: half, x1: -half, y1: -half, ix: 1, iy: 0 },
+  ];
+}
+
 /**
- * Local-space soft outline. Shared faces flush; exposed faces use
- * layout-space noise so parent outer edges match child outer edges.
+ * Local-space soft outline. Jag only on uncovered face gaps (flush elsewhere).
  */
-function buildRockOutline(size, exposed, edgeSeed, layoutX, layoutY) {
+function buildRockOutline(size, faceGaps, edgeSeed, layoutX, layoutY) {
   const half = size / 2;
   const segs = edgeSegCount(size);
-
-  const edges = [
-    { open: exposed.top, x0: -half, y0: -half, x1: half, y1: -half, ix: 0, iy: 1 },
-    { open: exposed.right, x0: half, y0: -half, x1: half, y1: half, ix: -1, iy: 0 },
-    { open: exposed.bottom, x0: half, y0: half, x1: -half, y1: half, ix: 0, iy: -1 },
-    { open: exposed.left, x0: -half, y0: half, x1: -half, y1: -half, ix: 1, iy: 0 },
-  ];
-
   const pts = [];
-  for (const e of edges) {
-    const n = e.open ? segs : 1;
+
+  for (const e of edgeDefs(half)) {
+    const gaps = faceGaps[e.key] || [];
+    const open = gaps.length > 0;
+    const n = open ? segs : 1;
+    const salt = axisSaltForEdge(e);
     for (let i = 0; i < n; i++) {
       const t = i / n;
       let x = e.x0 + (e.x1 - e.x0) * t;
       let y = e.y0 + (e.y1 - e.y0) * t;
-      if (e.open) {
-        const lx = layoutX + x + half;
-        const ly = layoutY + y + half;
-        const inset = edgeInset(edgeSeed, lx, ly);
-        x += e.ix * inset;
-        y += e.iy * inset;
+      if (open) {
+        const along = alongAtT(e, t, layoutX, layoutY, size);
+        if (inGaps(along, gaps)) {
+          const lx = layoutX + x + half;
+          const ly = layoutY + y + half;
+          const inset = edgeInset(edgeSeed, lx, ly, salt);
+          x += e.ix * inset;
+          y += e.iy * inset;
+        }
       }
       pts.push(x, y);
     }
@@ -114,15 +161,26 @@ function buildRockOutline(size, exposed, edgeSeed, layoutX, layoutY) {
   return pts;
 }
 
-function sampleExposedEdge(e, segs, edgeSeed, layoutX, layoutY, half) {
+/** Stroke one uncovered gap; t0/t1 in edge param space. */
+function sampleEdgeSpan(e, t0, t1, segs, edgeSeed, layoutX, layoutY, half, size) {
   const out = [];
-  for (let i = 0; i <= segs; i++) {
-    const t = i / segs;
+  const salt = axisSaltForEdge(e);
+  const outset = ROCK_EDGE_STROKE_OUTSET;
+  const span = Math.max(t1 - t0, 1e-6);
+  const n = Math.max(2, Math.ceil(segs * span));
+  for (let i = 0; i <= n; i++) {
+    const t = t0 + (i / n) * span;
     let x = e.x0 + (e.x1 - e.x0) * t;
     let y = e.y0 + (e.y1 - e.y0) * t;
-    const inset = edgeInset(edgeSeed, layoutX + x + half, layoutY + y + half);
-    x += e.ix * inset;
-    y += e.iy * inset;
+    const inset = edgeInset(
+      edgeSeed,
+      layoutX + x + half,
+      layoutY + y + half,
+      salt
+    );
+    const along = inset - outset;
+    x += e.ix * along;
+    y += e.iy * along;
     out.push(x, y);
   }
   return out;
@@ -223,7 +281,12 @@ export class Box extends GameObject {
       this.fill.mask = this.edgeMask;
       layer.addChild(this.gfx);
 
-      this.applyRockSilhouette({ top: true, right: true, bottom: true, left: true });
+      this.applyRockSilhouette({
+        top: [{ a0: this.layoutX, a1: this.layoutX + size }],
+        right: [{ a0: this.layoutY, a1: this.layoutY + size }],
+        bottom: [{ a0: this.layoutX, a1: this.layoutX + size }],
+        left: [{ a0: this.layoutY, a1: this.layoutY + size }],
+      });
     }
   }
 
@@ -251,13 +314,19 @@ export class Box extends GameObject {
   }
 
   /**
-   * @param {{ top: boolean, right: boolean, bottom: boolean, left: boolean }} exposed
+   * @param {{ top: {a0:number,a1:number}[], right: {a0:number,a1:number}[], bottom: {a0:number,a1:number}[], left: {a0:number,a1:number}[] }} faceGaps
    */
-  applyRockSilhouette(exposed) {
+  applyRockSilhouette(faceGaps) {
     if (!this.fill || !this.edgeMask || !this.edgeStroke) return;
+    const gaps = {
+      top: faceGaps.top || [],
+      right: faceGaps.right || [],
+      bottom: faceGaps.bottom || [],
+      left: faceGaps.left || [],
+    };
     const pts = buildRockOutline(
       this.size,
-      exposed,
+      gaps,
       this.edgeSeed,
       this.layoutX,
       this.layoutY
@@ -279,12 +348,6 @@ export class Box extends GameObject {
     );
     const half = this.size / 2;
     const segs = edgeSegCount(this.size);
-    const edges = [
-      { open: exposed.top, x0: -half, y0: -half, x1: half, y1: -half, ix: 0, iy: 1 },
-      { open: exposed.right, x0: half, y0: -half, x1: half, y1: half, ix: -1, iy: 0 },
-      { open: exposed.bottom, x0: half, y0: half, x1: -half, y1: half, ix: 0, iy: -1 },
-      { open: exposed.left, x0: -half, y0: half, x1: -half, y1: -half, ix: 1, iy: 0 },
-    ];
     const strokeOpts = {
       width: Math.max(0.75, sw),
       color: ROCK_EDGE_STROKE,
@@ -292,19 +355,38 @@ export class Box extends GameObject {
       join: 'round',
       cap: 'round',
     };
-    for (const e of edges) {
-      if (!e.open) continue;
-      const ep = sampleExposedEdge(
-        e,
-        segs,
-        this.edgeSeed,
-        this.layoutX,
-        this.layoutY,
-        half
-      );
-      stroke.moveTo(ep[0], ep[1]);
-      for (let i = 2; i < ep.length; i += 2) stroke.lineTo(ep[i], ep[i + 1]);
-      stroke.stroke(strokeOpts);
+
+    for (const e of edgeDefs(half)) {
+      const face = gaps[e.key];
+      if (!face.length) continue;
+      for (const g of face) {
+        let t0 = tForAlong(e, g.a0, this.layoutX, this.layoutY, this.size);
+        let t1 = tForAlong(e, g.a1, this.layoutX, this.layoutY, this.size);
+        // Bottom/left edges reverse along vs t — order t0<=t1 for sampling.
+        if (t0 > t1) {
+          const tmp = t0;
+          t0 = t1;
+          t1 = tmp;
+        }
+        t0 = Math.max(0, Math.min(1, t0));
+        t1 = Math.max(0, Math.min(1, t1));
+        if (t1 - t0 < 0.02) continue;
+        const ep = sampleEdgeSpan(
+          e,
+          t0,
+          t1,
+          segs,
+          this.edgeSeed,
+          this.layoutX,
+          this.layoutY,
+          half,
+          this.size
+        );
+        if (ep.length < 4) continue;
+        stroke.moveTo(ep[0], ep[1]);
+        for (let i = 2; i < ep.length; i += 2) stroke.lineTo(ep[i], ep[i + 1]);
+        stroke.stroke(strokeOpts);
+      }
     }
   }
 
