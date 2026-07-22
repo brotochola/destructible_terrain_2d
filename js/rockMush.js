@@ -444,8 +444,7 @@ export function bakeRockMushTextures(particleTextures, opts = {}) {
   for (let order = 2; order <= maxOrder; order++) {
     const want = orderTexSize(order);
     const rng = mulberry32(seed ^ Math.imul(order, 0x9e3779b9));
-    const childVisualRatio =
-      order === 2 ? ROCK_MUSH_VISUAL_RATIO : 1;
+    const childVisualRatio = order === 2 ? ROCK_MUSH_VISUAL_RATIO : 1;
     const { canvas, recipe } = bakeComposite(
       childCanvas,
       rng,
