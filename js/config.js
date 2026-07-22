@@ -15,12 +15,43 @@ export function orderSize(n) {
   return P_D * 2 ** n;
 }
 
-/** Shared bedrock texture (world-locked tile UVs on each intact box). */
-export const ROCK_TEXTURE_URL = "assets/rocky.jpg";
-/** TilingSprite tileScale — lower = denser stones / more repeats. */
-export const ROCK_TILE_SCALE = 0.25;
-/** Multiply tint on grayscale rock (warm dirt). */
-export const ROCK_TINT = 0xc4a574;
+export const MAT_DIRT = "dirt";
+export const MAT_STONE = "stone";
+/**
+ * Intact materials — texture/tint/physics.
+ * Laser HP ≈ ceil(hardness * density): hardness = cut resistance, density = mass to ablate.
+ */
+export const MATERIALS = {
+  [MAT_DIRT]: {
+    textureUrl: "assets/rocky.jpg",
+    tint: 0xc4a574,
+    tileScale: 0.25,
+    density: 1.0,
+    hardness: 1.0,
+  },
+  [MAT_STONE]: {
+    textureUrl: "assets/rocky2.jpg",
+    tint: 0xb0b0b0,
+    tileScale: 0.25,
+    density: 1.6,
+    hardness: 2.5,
+  },
+};
+
+/** Laser hits to split one intact node (min 1). */
+export function laserHpForMaterial(mat) {
+  const h = mat && mat.hardness != null ? mat.hardness : 1;
+  const d = mat && mat.density != null ? mat.density : 1;
+  return Math.max(1, Math.ceil(h * d));
+}
+/** Fraction of map depth at/below which solid cells become stone. */
+export const STONE_DEPTH_FRAC = 0.45;
+/** @deprecated use MATERIALS[MAT_DIRT].textureUrl */
+export const ROCK_TEXTURE_URL = MATERIALS[MAT_DIRT].textureUrl;
+/** @deprecated use MATERIALS[*].tileScale */
+export const ROCK_TILE_SCALE = MATERIALS[MAT_DIRT].tileScale;
+/** @deprecated use MATERIALS[MAT_DIRT].tint */
+export const ROCK_TINT = MATERIALS[MAT_DIRT].tint;
 /** Shatter bolita sprites (scaled down to SHATTER_BALL diameter). */
 export const ROCK_PARTICLE_URLS = ["assets/rock1.png", "assets/rock2.png"];
 /**
@@ -84,14 +115,16 @@ const _gen = generateLevel({
   threshold: SOLID_THRESHOLD,
   yBias: NOISE_Y_BIAS,
   maxPackOrder: MAX_PACK_ORDER,
+  stoneDepthFrac: STONE_DEPTH_FRAC,
 });
 
 /**
  * Root boxes in layout-local px (added to originX / terrainTop).
- * Packed from Perlin occupancy — order N → size P_D*2^N.
+ * Packed from Perlin occupancy — order N → size P_D*2^N; each has material.
  */
 export const LEVEL_LAYOUT = _gen.layout;
 export const MAP_OCCUPANCY = _gen.solid;
+export const MAP_MATERIALS = _gen.materials;
 export const MAP_COLS = _gen.cols;
 export const MAP_ROWS = _gen.rows;
 
@@ -128,6 +161,8 @@ export const LASER_FLASH_MS = 100;
 /** Runtime-tunable laser settings (UI mutates fields). */
 export const laserTunables = {
   cooldownMs: 111,
+  /** Damage per shot against intact HP (see laserHpForMaterial). */
+  damage: 1,
 };
 
 /** Balls spawned when an order-0 box shatters. */

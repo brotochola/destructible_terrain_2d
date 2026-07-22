@@ -1,7 +1,17 @@
 /**
- * Seeded Perlin FBM → order-1 occupancy mask → mamushka quadtree pack.
+ * Seeded Perlin FBM → order-1 occupancy mask → depth materials → mamushka pack.
  * Finest intact box is order 1 (side = leaf * 2).
+ * Material codes: 0 hollow, 1 dirt, 2 stone.
  */
+
+export const MAT_CODE_HOLLOW = 0;
+export const MAT_CODE_DIRT = 1;
+export const MAT_CODE_STONE = 2;
+
+const MAT_ID_BY_CODE = {
+  [MAT_CODE_DIRT]: "dirt",
+  [MAT_CODE_STONE]: "stone",
+};
 
 function mulberry32(seed) {
   let t = seed >>> 0;
@@ -134,9 +144,31 @@ export function smoothOccupancy(solid, cols, rows, passes = 1) {
   return cur;
 }
 
-function regionState(solid, cols, rows, gx, gy, side) {
+/**
+ * Parallel material grid from solid occupancy + depth.
+ * 0 = hollow, 1 = dirt (shallow), 2 = stone (deep).
+ */
+export function assignMaterialsByDepth(solid, cols, rows, stoneDepthFrac) {
+  const materials = new Uint8Array(cols * rows);
+  const frac = Math.max(0, Math.min(1, stoneDepthFrac));
+  for (let gy = 0; gy < rows; gy++) {
+    const depth = rows > 1 ? gy / (rows - 1) : 1;
+    const code = depth >= frac ? MAT_CODE_STONE : MAT_CODE_DIRT;
+    for (let gx = 0; gx < cols; gx++) {
+      const i = gy * cols + gx;
+      if (solid[i]) materials[i] = code;
+    }
+  }
+  return materials;
+}
+
+/**
+ * hollow | solid | mixed — solid only if fully occupied AND one material.
+ */
+function regionState(solid, materials, cols, rows, gx, gy, side) {
   let anySolid = false;
   let anyHollow = false;
+  let matCode = 0;
   for (let y = gy; y < gy + side; y++) {
     if (y < 0 || y >= rows) {
       anyHollow = true;
@@ -147,8 +179,14 @@ function regionState(solid, cols, rows, gx, gy, side) {
         anyHollow = true;
         if (anySolid) return "mixed";
       } else {
-        anySolid = true;
-        if (anyHollow) return "mixed";
+        const m = materials[y * cols + x];
+        if (!anySolid) {
+          matCode = m;
+          anySolid = true;
+          if (anyHollow) return "mixed";
+        } else if (m !== matCode) {
+          return "mixed";
+        }
       }
     }
   }
@@ -157,9 +195,15 @@ function regionState(solid, cols, rows, gx, gy, side) {
   return "mixed";
 }
 
+function materialIdAt(materials, cols, gx, gy) {
+  const code = materials[gy * cols + gx];
+  return MAT_ID_BY_CODE[code] || "dirt";
+}
+
 function packSquare(
   out,
   solid,
+  materials,
   cols,
   rows,
   gx,
@@ -169,7 +213,7 @@ function packSquare(
   maxPackOrder,
 ) {
   if (sideCells < 1) return;
-  const state = regionState(solid, cols, rows, gx, gy, sideCells);
+  const state = regionState(solid, materials, cols, rows, gx, gy, sideCells);
   if (state === "hollow") return;
 
   const order = 1 + Math.log2(sideCells);
@@ -178,23 +222,41 @@ function packSquare(
       order,
       x: gx * cellSizePx,
       y: gy * cellSizePx,
+      material: materialIdAt(materials, cols, gx, gy),
     });
     return;
   }
 
   if (sideCells === 1) {
     if (state === "solid") {
-      out.push({ order: 1, x: gx * cellSizePx, y: gy * cellSizePx });
+      out.push({
+        order: 1,
+        x: gx * cellSizePx,
+        y: gy * cellSizePx,
+        material: materialIdAt(materials, cols, gx, gy),
+      });
     }
     return;
   }
 
   // Hit max pack order while mixed/solid-too-big: force split.
   const half = sideCells >> 1;
-  packSquare(out, solid, cols, rows, gx, gy, half, cellSizePx, maxPackOrder);
   packSquare(
     out,
     solid,
+    materials,
+    cols,
+    rows,
+    gx,
+    gy,
+    half,
+    cellSizePx,
+    maxPackOrder,
+  );
+  packSquare(
+    out,
+    solid,
+    materials,
     cols,
     rows,
     gx + half,
@@ -206,6 +268,7 @@ function packSquare(
   packSquare(
     out,
     solid,
+    materials,
     cols,
     rows,
     gx,
@@ -217,6 +280,7 @@ function packSquare(
   packSquare(
     out,
     solid,
+    materials,
     cols,
     rows,
     gx + half,
@@ -234,6 +298,7 @@ function packSquare(
 function packRect(
   out,
   solid,
+  materials,
   cols,
   rows,
   gx,
@@ -248,10 +313,22 @@ function packRect(
   let side = 1;
   const maxFit = Math.min(w, h, maxSide);
   while (side * 2 <= maxFit) side *= 2;
-  packSquare(out, solid, cols, rows, gx, gy, side, cellSizePx, maxPackOrder);
+  packSquare(
+    out,
+    solid,
+    materials,
+    cols,
+    rows,
+    gx,
+    gy,
+    side,
+    cellSizePx,
+    maxPackOrder,
+  );
   packRect(
     out,
     solid,
+    materials,
     cols,
     rows,
     gx + side,
@@ -264,6 +341,7 @@ function packRect(
   packRect(
     out,
     solid,
+    materials,
     cols,
     rows,
     gx,
@@ -275,11 +353,19 @@ function packRect(
   );
 }
 
-export function packOccupancy(solid, cols, rows, cellSizePx, maxPackOrder) {
+export function packOccupancy(
+  solid,
+  materials,
+  cols,
+  rows,
+  cellSizePx,
+  maxPackOrder,
+) {
   const out = [];
   packRect(
     out,
     solid,
+    materials,
     cols,
     rows,
     0,
@@ -317,7 +403,7 @@ export function findHollowSpawn(solid, cols, rows, cellSizePx) {
 }
 
 /**
- * @returns {{ layout: {order,x,y}[], solid: Uint8Array, cols: number, rows: number, cellSizePx: number }}
+ * @returns {{ layout: {order,x,y,material}[], solid: Uint8Array, materials: Uint8Array, cols: number, rows: number, cellSizePx: number }}
  */
 export function generateLevel(opts) {
   const {
@@ -332,6 +418,7 @@ export function generateLevel(opts) {
     threshold,
     yBias = 0.35,
     maxPackOrder = 9,
+    stoneDepthFrac = 0.45,
   } = opts;
 
   const cols = Math.max(1, Math.floor(mapW / cellSizePx));
@@ -348,14 +435,22 @@ export function generateLevel(opts) {
     yBias,
   });
   const solid = smoothOccupancy(raw, cols, rows, 2);
-  const layout = packOccupancy(solid, cols, rows, cellSizePx, maxPackOrder);
-  return { layout, solid, cols, rows, cellSizePx };
+  const materials = assignMaterialsByDepth(solid, cols, rows, stoneDepthFrac);
+  const layout = packOccupancy(
+    solid,
+    materials,
+    cols,
+    rows,
+    cellSizePx,
+    maxPackOrder,
+  );
+  return { layout, solid, materials, cols, rows, cellSizePx };
 }
 
 /** ponytail: fails if pack misses solid or double-covers. Run: node js/procgen.js */
 function selfCheck() {
   const cell = 10;
-  const { layout, solid, cols, rows } = generateLevel({
+  const { layout, solid, materials, cols, rows } = generateLevel({
     mapW: 320,
     mapH: 160,
     cellSizePx: cell,
@@ -365,25 +460,48 @@ function selfCheck() {
     threshold: 0.1,
     yBias: 0.4,
     maxPackOrder: 6,
+    stoneDepthFrac: 0.45,
   });
   const cover = new Uint8Array(cols * rows);
+  let dirt = 0;
+  let stone = 0;
   for (const item of layout) {
+    if (!item.material) throw new Error("layout missing material");
+    if (item.material === "dirt") dirt++;
+    else if (item.material === "stone") stone++;
+    else throw new Error("unknown material " + item.material);
     const side = 2 ** (item.order - 1);
     const gx0 = Math.round(item.x / cell);
     const gy0 = Math.round(item.y / cell);
+    const want =
+      item.material === "stone" ? MAT_CODE_STONE : MAT_CODE_DIRT;
     for (let dy = 0; dy < side; dy++) {
       for (let dx = 0; dx < side; dx++) {
         const i = (gy0 + dy) * cols + (gx0 + dx);
-        if (cover[i]) throw new Error("double cover at " + (gx0 + dx) + "," + (gy0 + dy));
+        if (cover[i])
+          throw new Error("double cover at " + (gx0 + dx) + "," + (gy0 + dy));
         cover[i] = 1;
-        if (!solid[i]) throw new Error("pack over hollow at " + (gx0 + dx) + "," + (gy0 + dy));
+        if (!solid[i])
+          throw new Error("pack over hollow at " + (gx0 + dx) + "," + (gy0 + dy));
+        if (materials[i] !== want)
+          throw new Error(
+            "material mismatch at " + (gx0 + dx) + "," + (gy0 + dy),
+          );
       }
     }
   }
   for (let i = 0; i < solid.length; i++) {
     if (solid[i] && !cover[i]) throw new Error("missed solid cell " + i);
   }
-  console.log("procgen self-check ok — roots", layout.length);
+  if (!dirt || !stone) throw new Error("expected both dirt and stone roots");
+  console.log(
+    "procgen self-check ok — roots",
+    layout.length,
+    "dirt",
+    dirt,
+    "stone",
+    stone,
+  );
 }
 
 const isMain =

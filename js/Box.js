@@ -1,6 +1,5 @@
 import {
   BOX_ANGULAR_DAMPING,
-  BOX_DENSITY,
   BOX_FRICTION,
   BOX_LINEAR_DAMPING,
   BOX_RESTITUTION,
@@ -9,6 +8,9 @@ import {
   CAT_PARTICLE,
   CAT_WALL,
   DYNAMIC_MAX_ORDER,
+  MAT_DIRT,
+  MATERIALS,
+  laserHpForMaterial,
   ROCK_CACHE_MAX_PX,
   ROCK_EDGE_AMP,
   ROCK_EDGE_AMP2,
@@ -20,8 +22,6 @@ import {
   ROCK_EDGE_STROKE_WIDTH_FRAC,
   ROCK_EDGE_STROKE_WIDTH_MAX,
   ROCK_FILL_OVERLAP_PX,
-  ROCK_TILE_SCALE,
-  ROCK_TINT,
   m2px,
   orderSize,
   Vec2,
@@ -202,8 +202,9 @@ export class Box extends GameObject {
    * @param {number|string} rootId unique per root mamushka
    * @param {import('pixi.js').Container} [layer]
    * @param {number} [angle] body angle radians
-   * @param {import('pixi.js').Texture | null} [rockTexture]
+   * @param {Record<string, import('pixi.js').Texture> | null} [rockTextures]
    * @param {{ tilePosX?: number, tilePosY?: number, layoutX?: number, layoutY?: number, edgeSeed?: number } | null} [visual]
+   * @param {string} [materialId]
    */
   constructor(
     world,
@@ -215,8 +216,9 @@ export class Box extends GameObject {
     rootId,
     layer = null,
     angle = 0,
-    rockTexture = null,
+    rockTextures = null,
     visual = null,
+    materialId = MAT_DIRT,
   ) {
     const size = orderSize(order);
     const isDynamic = order <= DYNAMIC_MAX_ORDER;
@@ -240,6 +242,11 @@ export class Box extends GameObject {
     this.y = y;
     this.size = size;
     this.isDynamic = isDynamic;
+    this.materialId =
+      materialId && MATERIALS[materialId] ? materialId : MAT_DIRT;
+    const mat = MATERIALS[this.materialId];
+    this.maxHp = laserHpForMaterial(mat);
+    this.hp = this.maxHp;
 
     // Layout/UV frozen at spawn (or inherited from parent on break).
     this.layoutX = visual && visual.layoutX != null ? visual.layoutX : x;
@@ -257,6 +264,10 @@ export class Box extends GameObject {
     this.edgeStroke = null;
     this._cached = false;
 
+    const rockTexture =
+      rockTextures && rockTextures[this.materialId]
+        ? rockTextures[this.materialId]
+        : null;
     if (layer && rockTexture) {
       this.gfx = new Container();
       this.gfx.position.set(cx, cy);
@@ -268,9 +279,9 @@ export class Box extends GameObject {
         height: size,
       });
       this.fill.anchor.set(0.5);
-      this.fill.tileScale.set(ROCK_TILE_SCALE, ROCK_TILE_SCALE);
+      this.fill.tileScale.set(mat.tileScale, mat.tileScale);
       this.fill.tilePosition.set(this.tilePosX, this.tilePosY);
-      this.fill.tint = ROCK_TINT;
+      this.fill.tint = mat.tint;
 
       this.edgeMask = new Graphics();
       this.edgeStroke = new Graphics();
@@ -286,7 +297,7 @@ export class Box extends GameObject {
     }
 
     this.createBoxFixture(px2m(size / 2), px2m(size / 2), {
-      density: isDynamic ? BOX_DENSITY : 0,
+      density: isDynamic ? mat.density : 0,
       friction: BOX_FRICTION,
       restitution: BOX_RESTITUTION,
       filterCategoryBits: CAT_INTACT,

@@ -91,7 +91,7 @@ export class Game {
       particles: this.renderer.particles,
       particleBuckets: this.renderer.particleBuckets,
       particleTextures: this.renderer.particleTextures,
-      rockTexture: this.renderer.rockTexture,
+      rockTextures: this.renderer.rockTextures,
     });
 
     this.bindContacts();
@@ -384,10 +384,11 @@ export class Game {
     if (closest.kind === "intact") {
       const data = closest.body.getUserData();
       if (data && data.gameObject) {
-        this.terrain.breakNode(
+        this.terrain.hitNode(
           data.gameObject,
           m2px(closest.point.x),
           m2px(closest.point.y),
+          laserTunables.damage,
         );
       }
     } else if (closest.kind === "particle") {

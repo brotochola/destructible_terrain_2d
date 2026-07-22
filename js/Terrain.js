@@ -3,6 +3,8 @@ import {
   CULL_CELL_PX,
   CULL_DIRTY_PX,
   LEVEL_LAYOUT,
+  MAT_DIRT,
+  MATERIALS,
   MAX_MAMUSHKA_ORDER,
   particleTunables,
   SHATTER_BALL_COUNT,
@@ -245,7 +247,7 @@ const NEIGHBOR_DIRS = [
 export class Terrain {
   /**
    * @param {*} world Planck world
-   * @param {{ boxes: import('pixi.js').Container, particles: import('pixi.js').Container, particleBuckets?: import('pixi.js').ParticleContainer[], particleTextures?: import('pixi.js').Texture[], rockTexture?: import('pixi.js').Texture }} layers
+   * @param {{ boxes: import('pixi.js').Container, particles: import('pixi.js').Container, particleBuckets?: import('pixi.js').ParticleContainer[], particleTextures?: import('pixi.js').Texture[], rockTextures?: Record<string, import('pixi.js').Texture> }} layers
    */
   constructor(world, layers = null) {
     this.world = world;
@@ -253,7 +255,7 @@ export class Terrain {
     this.particleLayer = layers && layers.particles;
     this.particleBuckets = (layers && layers.particleBuckets) || null;
     this.particleTextures = layers && layers.particleTextures;
-    this.rockTexture = layers && layers.rockTexture;
+    this.rockTextures = (layers && layers.rockTextures) || {};
     this.intact = new Map();
     this.dynamicIntact = new Set();
     this.freeParticles = [];
@@ -290,11 +292,13 @@ export class Terrain {
         dy,
       )) {
         if (other === box) continue;
+        if (other.materialId !== box.materialId) continue;
         if (!box.isDynamic && !other.isDynamic) continue;
         weldBoxes(this.world, box, other);
       }
     }
     this.forCrossRootTouching(box, (other) => {
+      if (other.materialId !== box.materialId) return;
       if (!box.isDynamic && !other.isDynamic) return;
       weldBoxes(this.world, box, other);
     });
@@ -324,7 +328,7 @@ export class Terrain {
    * Uncovered intervals on a face → stroke/chew there.
    * Empty = neighbor covers this side (seal, no stroke).
    * Rule: covering intact neighbor? seal (or subtract their span). Else draw.
-   * Welds ignored — silhouette follows grid/touch occupancy only.
+   * Different material → uncovered (jag like void). Welds ignored.
    */
   getFaceGaps(box, dx, dy) {
     const target = edgeAlongInterval(box, dx, dy);
@@ -340,6 +344,7 @@ export class Terrain {
       dx,
       dy,
     )) {
+      if (n.materialId !== box.materialId) continue;
       // Equal or larger neighbor occupies the whole adjacent cell → full seal.
       if (n.order >= box.order) return [];
       covered.push(edgeAlongInterval(n, dx, dy));
@@ -349,6 +354,7 @@ export class Terrain {
     const cross = [];
     this.forCrossRootTouching(box, (other) => cross.push(other));
     for (const other of cross) {
+      if (other.materialId !== box.materialId) continue;
       if (!sharesCardinalFace(A, aabbOf(other), dx, dy, eps)) continue;
       if (other.order >= box.order) return [];
       covered.push(edgeAlongInterval(other, dx, dy));
@@ -423,7 +429,7 @@ export class Terrain {
    * @param {number} [angle]
    * @param {{ vx: number, vy: number, omega: number } | null} [velocity]
    * @param {{ tilePosX?: number, tilePosY?: number, layoutX?: number, layoutY?: number, edgeSeed?: number } | null} [visual]
-   * @param {{ deferEdges?: boolean }} [opts] skip silhouette until caller refreshes (multi-spawn)
+   * @param {{ deferEdges?: boolean, materialId?: string }} [opts] skip silhouette until caller refreshes (multi-spawn)
    */
   createNode(
     order,
@@ -437,8 +443,11 @@ export class Terrain {
     visual = null,
     opts = null,
   ) {
-    if (this.boxLayer && !this.rockTexture) {
-      throw new Error("rock texture missing for intact boxes");
+    const materialId =
+      (opts && opts.materialId) ||
+      MAT_DIRT;
+    if (this.boxLayer && !this.rockTextures[materialId]) {
+      throw new Error("rock texture missing for material " + materialId);
     }
     const box = new Box(
       this.world,
@@ -450,8 +459,9 @@ export class Terrain {
       rootId,
       this.boxLayer,
       angle,
-      this.rockTexture,
+      this.rockTextures,
       visual,
+      materialId,
     );
     if (velocity && box.isDynamic && box.body) {
       box.body.setLinearVelocity(Vec2(velocity.vx, velocity.vy));
@@ -468,9 +478,22 @@ export class Terrain {
     return box;
   }
 
-  addRoot({ order, x, y }) {
+  addRoot({ order, x, y, material }) {
     const rootId = this._nextRootId++;
-    return this.createNode(order, originX + x, terrainTop + y, 0, 0, rootId);
+    const materialId =
+      material && MATERIALS[material] ? material : MAT_DIRT;
+    return this.createNode(
+      order,
+      originX + x,
+      terrainTop + y,
+      0,
+      0,
+      rootId,
+      0,
+      null,
+      null,
+      { materialId },
+    );
   }
 
   initFromLayout() {
@@ -516,6 +539,20 @@ export class Terrain {
     this.enforceParticleCap();
   }
 
+  /**
+   * Apply laser (or other) damage. Splits/shatters when hp ≤ 0.
+   * @returns {boolean} true if node broke
+   */
+  hitNode(node, ix, iy, damage = 1) {
+    if (!node || !this.intact.has(nodeKey(node))) return false;
+    const dmg = Math.max(0, damage);
+    if (dmg <= 0) return false;
+    node.hp = (node.hp != null ? node.hp : node.maxHp || 1) - dmg;
+    if (node.hp > 0) return false;
+    this.breakNode(node, ix, iy);
+    return true;
+  }
+
   breakNode(node, ix, iy) {
     if (!this.intact.has(nodeKey(node))) return;
 
@@ -530,6 +567,7 @@ export class Terrain {
     const parentGy = node.gy;
     const parentOrder = node.order;
     const rootId = node.rootId;
+    const parentMaterialId = node.materialId || MAT_DIRT;
     const parentVisual = {
       tilePosX: node.tilePosX,
       tilePosY: node.tilePosY,
@@ -578,7 +616,7 @@ export class Terrain {
             pose.angle,
             velocity,
             visual,
-            { deferEdges: true },
+            { deferEdges: true, materialId: parentMaterialId },
           ),
         );
       }
@@ -617,6 +655,7 @@ export class Terrain {
     const parentX = a.x;
     const parentY = a.y;
     const visual = a.visualAsParent();
+    const materialId = a.materialId || MAT_DIRT;
 
     for (const sib of [a, b, c, d]) {
       this.dynamicIntact.delete(sib);
@@ -636,6 +675,7 @@ export class Terrain {
       0,
       null,
       visual,
+      { materialId },
     );
     return true;
   }

@@ -11,8 +11,8 @@ import {
 } from 'https://cdn.jsdelivr.net/npm/pixi.js@8.19.0/dist/pixi.min.mjs';
 import {
   H,
+  MATERIALS,
   ROCK_PARTICLE_URLS,
-  ROCK_TEXTURE_URL,
   W,
   m2px,
 } from './config.js';
@@ -35,8 +35,8 @@ export class Renderer {
     this.particles = null;
     this.particleTextures = null;
     this.particleBuckets = null;
-    /** @type {import('pixi.js').Texture | null} */
-    this.rockTexture = null;
+    /** @type {Record<string, import('pixi.js').Texture>} */
+    this.rockTextures = {};
     this.fx = null;
     this.actors = null;
     this.laserGfx = null;
@@ -63,7 +63,13 @@ export class Renderer {
     this.particleTextures = await Promise.all(
       ROCK_PARTICLE_URLS.map((url) => Assets.load(url))
     );
-    this.rockTexture = await Assets.load(ROCK_TEXTURE_URL);
+    const urls = [...new Set(Object.values(MATERIALS).map((m) => m.textureUrl))];
+    const loaded = await Promise.all(urls.map((url) => Assets.load(url)));
+    const byUrl = Object.fromEntries(urls.map((url, i) => [url, loaded[i]]));
+    this.rockTextures = {};
+    for (const [id, mat] of Object.entries(MATERIALS)) {
+      this.rockTextures[id] = byUrl[mat.textureUrl];
+    }
 
     this.world = new Container();
     this.boxes = new Container();
