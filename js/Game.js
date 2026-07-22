@@ -1,11 +1,17 @@
 import {
+  BOMB_FLASH_MS,
+  BOMB_KICK_PER_DAMAGE,
+  BOMB_MIN_DIST_PX,
+  CAT_BOMB,
   CAT_CHARACTER,
   CAT_INTACT,
   CAT_PARTICLE,
   CAT_WALL,
+  CHAR_SIZE,
   H,
   LASER_FLASH_MS,
   LASER_RANGE,
+  bombTunables,
   laserTunables,
   PHYS_H,
   PHYS_W,
@@ -23,13 +29,15 @@ import {
   px2m,
   terrainTop,
 } from "./config.js";
+import { Bomb } from "./Bomb.js";
 import { Camera } from "./Camera.js";
 import { Character } from "./Character.js";
 import { FrameFps, MsMeter } from "./FpsMeter.js";
 import { Renderer } from "./Renderer.js";
 import { Terrain } from "./Terrain.js";
 
-const WALL_MASK = CAT_WALL | CAT_INTACT | CAT_PARTICLE | CAT_CHARACTER;
+const WALL_MASK =
+  CAT_WALL | CAT_INTACT | CAT_PARTICLE | CAT_CHARACTER | CAT_BOMB;
 
 export class Game {
   constructor() {
@@ -42,6 +50,8 @@ export class Game {
     this.character = null;
 
     this.lasers = [];
+    this.explosions = [];
+    this.bombs = [];
     this.keys = Object.create(null);
     this.mouseSX = W / 2;
     this.mouseSY = H / 2;
@@ -50,6 +60,7 @@ export class Game {
     this.pinch = null;
     this.firing = false;
     this.lastFireAt = 0;
+    this.lastBombAt = 0;
 
     this.worldMs = new MsMeter();
     this.renderMs = new MsMeter();
@@ -220,13 +231,17 @@ export class Game {
         }
         return;
       }
+      if (e.code === "Space") {
+        e.preventDefault();
+        if (!e.repeat) this.throwBomb();
+        return;
+      }
       if (
         [
           "KeyW",
           "KeyA",
           "KeyS",
           "KeyD",
-          "Space",
           "ArrowUp",
           "ArrowDown",
           "ArrowLeft",
@@ -396,10 +411,143 @@ export class Game {
     }
   }
 
+  throwBomb() {
+    if (!this.character || !this.character.body) return;
+    const now = performance.now();
+    if (now - this.lastBombAt < bombTunables.cooldownMs) return;
+    this.lastBombAt = now;
+
+    const ang = this.character.aimAngle(
+      this.mouseSX,
+      this.mouseSY,
+      this.camera,
+      this.camera.viewScale(),
+    );
+    const pos = this.character.getPositionPx();
+    const offset = CHAR_SIZE * 0.55 + bombTunables.radiusBodyPx;
+    const x = pos.x + Math.cos(ang) * offset;
+    const y = pos.y + Math.sin(ang) * offset;
+    const speed = bombTunables.throwSpeed;
+    const bomb = new Bomb(
+      this.world,
+      x,
+      y,
+      Math.cos(ang) * speed,
+      Math.sin(ang) * speed,
+      this.renderer.actors,
+      bombTunables.fuseMs,
+    );
+    this.bombs.push(bomb);
+  }
+
+  /** Radial impulse ∝ damage (unit dir from blast center). Dynamic bodies only. */
+  blastKick(body, dx, dy, distSq, damage) {
+    if (!body || typeof body.isDynamic === "function" && !body.isDynamic())
+      return;
+    const inv = 1 / Math.sqrt(distSq);
+    const mag = px2m(damage * BOMB_KICK_PER_DAMAGE);
+    body.applyLinearImpulse(
+      Vec2(dx * inv * mag, dy * inv * mag),
+      body.getPosition(),
+      true,
+    );
+  }
+
+  /**
+   * Radial blast: damage = power / distSq (distSq floored). Snapshot first.
+   * Impulse applied before HP so breakNode kids inherit blast velocity.
+   */
+  detonateBomb(bomb) {
+    if (!bomb || !bomb.body) return;
+    const { x: bx, y: by } = bomb.getPositionPx();
+    bomb.destroy();
+
+    const r = bombTunables.radiusPx;
+    const rSq = r * r;
+    const minSq = BOMB_MIN_DIST_PX * BOMB_MIN_DIST_PX;
+    const power = bombTunables.power;
+
+    const intactHit = [];
+    const found = this.terrain.cullHash.query({
+      x0: bx - r,
+      y0: by - r,
+      x1: bx + r,
+      y1: by + r,
+    });
+    for (const node of found) intactHit.push(node);
+
+    const particleHit = this.terrain.freeParticles.slice();
+
+    for (const node of intactHit) {
+      if (!node || !node.body) continue;
+      const p = node.getPositionPx();
+      const dx = p.x - bx;
+      const dy = p.y - by;
+      const rawSq = dx * dx + dy * dy;
+      if (rawSq > rSq) continue;
+      const distSq = rawSq < minSq ? minSq : rawSq;
+      const damage = power / distSq;
+      this.blastKick(node.body, dx, dy, distSq, damage);
+      this.terrain.hitNode(node, bx, by, damage);
+    }
+
+    for (const piece of particleHit) {
+      if (!piece || !piece.body) continue;
+      const p = piece.getPositionPx();
+      const dx = p.x - bx;
+      const dy = p.y - by;
+      const rawSq = dx * dx + dy * dy;
+      if (rawSq > rSq) continue;
+      const distSq = rawSq < minSq ? minSq : rawSq;
+      this.blastKick(piece.body, dx, dy, distSq, power / distSq);
+    }
+
+    if (this.character && this.character.body) {
+      const p = this.character.getPositionPx();
+      const dx = p.x - bx;
+      const dy = p.y - by;
+      const rawSq = dx * dx + dy * dy;
+      if (rawSq <= rSq) {
+        const distSq = rawSq < minSq ? minSq : rawSq;
+        this.blastKick(
+          this.character.body,
+          dx,
+          dy,
+          distSq,
+          power / distSq,
+        );
+      }
+    }
+
+    this.explosions.push({
+      x: bx,
+      y: by,
+      r,
+      until: performance.now() + BOMB_FLASH_MS,
+    });
+  }
+
+  updateBombs(now) {
+    for (let i = this.bombs.length - 1; i >= 0; i--) {
+      const bomb = this.bombs[i];
+      if (!bomb.expired(now)) continue;
+      this.bombs.splice(i, 1);
+      this.detonateBomb(bomb);
+    }
+  }
+
   updateLasers(now) {
     for (let i = this.lasers.length - 1; i >= 0; i--) {
       if (this.lasers[i].until < now) this.lasers.splice(i, 1);
     }
+    for (let i = this.explosions.length - 1; i >= 0; i--) {
+      if (this.explosions[i].until < now) this.explosions.splice(i, 1);
+    }
+  }
+
+  clearBombs() {
+    for (const bomb of this.bombs) bomb.destroy();
+    this.bombs.length = 0;
   }
 
   draw() {
@@ -417,6 +565,8 @@ export class Game {
       this.camera.viewBounds(PHYS_ACTIVE_MARGIN_PX),
     );
     this.renderer.drawLasers(this.lasers, vs);
+    this.renderer.drawExplosions(this.explosions, vs);
+    for (const bomb of this.bombs) bomb.syncGfx(vs);
     if (this.character) this.character.syncGfx(view);
     if (this.debugPhys) {
       const n = this.renderer.drawDebug(this.world, vs);
@@ -458,8 +608,10 @@ export class Game {
   }
 
   reset() {
+    this.clearBombs();
     this.terrain.reset();
     this.lasers.length = 0;
+    this.explosions.length = 0;
     this.renderer.clearLasers();
     this.camera.resetZoom();
     this.spawnCharacter();
@@ -481,6 +633,7 @@ export class Game {
     // } else {
     // this.world.step(1 / 60, 4, 1);
     // }
+    this.updateBombs(t);
     this.terrain.cullParticles(t);
     this.terrain.coalesceQuiet(this.camera.viewBounds(VIEW_CULL_MARGIN_PX));
     this.updateLasers(t);

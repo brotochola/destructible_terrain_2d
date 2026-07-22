@@ -23,6 +23,7 @@ const DEBUG_COLORS = {
   intactDynamic: 0xffaa66,
   particle: 0xff6666,
   character: 0x66ff66,
+  bomb: 0xff5533,
   other: 0xaaaaaa,
   joint: 0xffff00,
 };
@@ -131,6 +132,19 @@ export class Renderer {
     }
   }
 
+  /** Blast rings on same fx layer (call after drawLasers — does not clear). */
+  drawExplosions(explosions, viewScale) {
+    if (!explosions || !explosions.length) return;
+    const g = this.laserGfx;
+    const lw = 2.5 / viewScale;
+    for (const e of explosions) {
+      g.circle(e.x, e.y, e.r);
+      g.stroke({ width: lw, color: 0xffaa33, alpha: 0.55 });
+      g.circle(e.x, e.y, e.r * 0.45);
+      g.fill({ color: 0xff6622, alpha: 0.2 });
+    }
+  }
+
   clearDebug() {
     this.debugGfx.clear();
   }
@@ -160,6 +174,7 @@ export class Renderer {
       if (kind === 'wall') color = DEBUG_COLORS.wall;
       else if (kind === 'particle') color = DEBUG_COLORS.particle;
       else if (kind === 'character') color = DEBUG_COLORS.character;
+      else if (kind === 'bomb') color = DEBUG_COLORS.bomb;
       else if (kind === 'intact') {
         color = body.isDynamic()
           ? DEBUG_COLORS.intactDynamic

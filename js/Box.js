@@ -3,6 +3,7 @@ import {
   BOX_FRICTION,
   BOX_LINEAR_DAMPING,
   BOX_RESTITUTION,
+  CAT_BOMB,
   CAT_CHARACTER,
   CAT_INTACT,
   CAT_PARTICLE,
@@ -30,7 +31,8 @@ import {
 import { GameObject } from "./GameObject.js";
 import { Container, Graphics, TilingSprite } from "./Renderer.js";
 
-const INTACT_MASK = CAT_WALL | CAT_INTACT | CAT_PARTICLE | CAT_CHARACTER;
+const INTACT_MASK =
+  CAT_WALL | CAT_INTACT | CAT_PARTICLE | CAT_CHARACTER | CAT_BOMB;
 
 /** Deterministic 0..1 from integer seeds. */
 function hash01(a, b, c = 0) {

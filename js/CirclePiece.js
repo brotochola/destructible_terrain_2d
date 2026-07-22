@@ -1,4 +1,5 @@
 import {
+  CAT_BOMB,
   CAT_CHARACTER,
   CAT_INTACT,
   CAT_PARTICLE,
@@ -13,7 +14,7 @@ import {
 import { GameObject } from "./GameObject.js";
 import { Particle } from "./Renderer.js";
 
-const PARTICLE_BASE_MASK = CAT_WALL | CAT_INTACT | CAT_CHARACTER;
+const PARTICLE_BASE_MASK = CAT_WALL | CAT_INTACT | CAT_CHARACTER | CAT_BOMB;
 
 function particleMask(collide = particleTunables.collide) {
   return collide ? PARTICLE_BASE_MASK | CAT_PARTICLE : PARTICLE_BASE_MASK;

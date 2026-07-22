@@ -1,3 +1,3 @@
-import { Game } from './Game.js';
-
-new Game().start();
+import { Game } from "./Game.js";
+window.game = new Game();
+window.game.start();

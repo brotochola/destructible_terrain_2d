@@ -88,7 +88,7 @@ export const ROCK_FILL_OVERLAP_PX = 1.5;
 /** Procedural map size (layout px). */
 export const MAP_W = 4000;
 export const MAP_H = 1200;
-export const MAP_SEED = 919191;
+export const MAP_SEED = 9193191;
 /** Global edge-noise seed — world-locked so neighboring roots share chew. */
 export const ROCK_EDGE_SEED = MAP_SEED ^ 0x51eed;
 /** Noise frequency in order-1 cell units (lower = bigger caves). */
@@ -186,6 +186,26 @@ export const CAT_WALL = 0x0001;
 export const CAT_INTACT = 0x0002;
 export const CAT_PARTICLE = 0x0004;
 export const CAT_CHARACTER = 0x0008;
+export const CAT_BOMB = 0x0010;
+
+/** Runtime-tunable bomb throw / blast. */
+export const bombTunables = {
+  cooldownMs: 40,
+  fuseMs: 900,
+  throwSpeed: px2m(280),
+  /** Damage at 1px; damage = power / distSq. */
+  power: 8111,
+  /** AOE cutoff (px). */
+  radiusPx: 220,
+  /** Collider / sprite radius (px). */
+  radiusBodyPx: 8,
+};
+/** Floor for distSq so blast center never divides by 0. */
+export const BOMB_MIN_DIST_PX = 8;
+/** Explosion flash lifetime (ms). */
+export const BOMB_FLASH_MS = 120;
+/** Radial impulse scale (px-equivalent × damage) for character / soft particle hits. */
+export const BOMB_KICK_PER_DAMAGE = 12;
 
 /** Runtime-tunable particle limits / sleep cull (UI mutates fields). */
 export const particleTunables = {

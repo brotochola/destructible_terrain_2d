@@ -1,4 +1,5 @@
 import {
+  CAT_BOMB,
   CAT_CHARACTER,
   CAT_INTACT,
   CAT_PARTICLE,
@@ -16,7 +17,8 @@ import {
 import { GameObject } from "./GameObject.js";
 import { Container, Graphics } from "./Renderer.js";
 
-const CHARACTER_MASK = CAT_WALL | CAT_INTACT | CAT_PARTICLE | CAT_CHARACTER;
+const CHARACTER_MASK =
+  CAT_WALL | CAT_INTACT | CAT_PARTICLE | CAT_CHARACTER | CAT_BOMB;
 
 export class Character extends GameObject {
   constructor(world, x, y, layer = null) {
