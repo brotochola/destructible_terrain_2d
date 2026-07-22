@@ -156,7 +156,7 @@ export const particleTunables = {
   /** Frames asleep before settle-cull. 0 = no settle cull. */
   settleFrames: 90,
   /** When true, free particles collide with each other. */
-  collide: false,
+  collide: true,
 };
 export const VIEW_CULL_MARGIN_PX = 120;
 /** Body active if AABB overlaps view expanded by this (≥ LASER_RANGE px). */

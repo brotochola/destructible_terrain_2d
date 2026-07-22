@@ -236,13 +236,19 @@ function stampRock(ctx, brushes, cx, cy, stampPx, rng) {
   );
 }
 
+/** Order-1 stamp size in bake tex px. Rock pixel size stays fixed across orders
+ * (composites blit children 1:1), so seam stamps must use this same value. */
+function order1StampPx() {
+  return ROCK_PARTICLE_VISUAL * 3;
+}
+
 /**
  * Order-1: pad work canvas → stamp (centers inset so stamps stay whole) →
  * crop inner tex. Do not center on crop edge — that slices rocks in half.
  */
 function bakeOrder1Cluster(brushes, rng) {
   const finalSize = orderTexSize(1);
-  const stampPx = ROCK_PARTICLE_VISUAL * 3;
+  const stampPx = order1StampPx();
   const pad = Math.ceil(stampPx / 2);
   const work = finalSize + 2 * pad;
   const canvas = document.createElement("canvas");
@@ -329,8 +335,8 @@ function bakeOrder1Cluster(brushes, rng) {
 
 /**
  * 2× child composite at 1:1 (keeps whole rocks). Fill + seam with stamps so
- * quads do not leave a black cross. Scaling quads by VISUAL_RATIO knife-cuts
- * outer rocks when clipped to atlas.
+ * quads do not leave a black cross. Seam stamp px = order-1 stamp px (rocks
+ * do not grow when atlas doubles).
  * Recipe: [{ variant:0, rot }, ×4] index dy*2+dx.
  */
 function bakeComposite(childCanvas, brushes, rng) {
@@ -357,9 +363,7 @@ function bakeComposite(childCanvas, brushes, rng) {
     throw new Error(`rock mush recipe length ${recipe.length}, want 4`);
   }
 
-  // Same particle size as order-1 bake, scaled if child tex is larger than order-1.
-  const stampPx =
-    ROCK_PARTICLE_VISUAL * 3 * (childSize / orderTexSize(1));
+  const stampPx = order1StampPx();
   const stampR = stampPx / 2;
   const step = stampPx * 0.55;
   const seam0 = stampR;
