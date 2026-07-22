@@ -4,6 +4,10 @@ import {
   BOX_FRICTION,
   BOX_LINEAR_DAMPING,
   BOX_RESTITUTION,
+  CAT_CHARACTER,
+  CAT_INTACT,
+  CAT_PARTICLE,
+  CAT_WALL,
   DYNAMIC_MAX_ORDER,
   colorForOrder,
   hexToNum,
@@ -14,6 +18,8 @@ import {
 } from './config.js';
 import { GameObject } from './GameObject.js';
 import { Graphics } from './Renderer.js';
+
+const INTACT_MASK = CAT_WALL | CAT_INTACT | CAT_PARTICLE | CAT_CHARACTER;
 
 export class Box extends GameObject {
   /**
@@ -53,6 +59,8 @@ export class Box extends GameObject {
       density: isDynamic ? BOX_DENSITY : 0,
       friction: BOX_FRICTION,
       restitution: BOX_RESTITUTION,
+      filterCategoryBits: CAT_INTACT,
+      filterMaskBits: INTACT_MASK,
     });
 
     if (layer) {
@@ -68,6 +76,7 @@ export class Box extends GameObject {
 
   syncGfx() {
     if (!this.isDynamic || !this.gfx || !this.body) return;
+    if (!this.body.isAwake()) return;
     const p = this.body.getPosition();
     this.gfx.position.set(m2px(p.x), m2px(p.y));
     this.gfx.rotation = this.body.getAngle();

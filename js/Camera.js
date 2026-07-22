@@ -39,6 +39,19 @@ export class Camera {
     };
   }
 
+  /** World-px AABB of the camera view, optionally expanded by margin. */
+  viewBounds(margin = 0) {
+    const vs = this.viewScale();
+    const hw = W / 2 / vs + margin;
+    const hh = H / 2 / vs + margin;
+    return {
+      x0: this.cx - hw,
+      y0: this.cy - hh,
+      x1: this.cx + hw,
+      y1: this.cy + hh,
+    };
+  }
+
   follow(character) {
     if (!character || !character.body) return;
     const p = character.body.getPosition();

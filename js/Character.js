@@ -1,4 +1,8 @@
 import {
+  CAT_CHARACTER,
+  CAT_INTACT,
+  CAT_PARTICLE,
+  CAT_WALL,
   CHAR_SIZE,
   FAST_FALL_IMPULSE,
   JUMP_IMPULSE,
@@ -11,6 +15,8 @@ import {
 } from './config.js';
 import { GameObject } from './GameObject.js';
 import { Graphics } from './Renderer.js';
+
+const CHARACTER_MASK = CAT_WALL | CAT_INTACT | CAT_PARTICLE | CAT_CHARACTER;
 
 export class Character extends GameObject {
   constructor(world, x, y, layer = null) {
@@ -30,6 +36,8 @@ export class Character extends GameObject {
       density: 1.5,
       friction: 0.4,
       restitution: 0,
+      filterCategoryBits: CAT_CHARACTER,
+      filterMaskBits: CHARACTER_MASK,
     });
 
     if (layer) {

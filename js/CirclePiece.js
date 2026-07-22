@@ -1,9 +1,36 @@
-import { P_D, Vec2, m2px, px2m } from './config.js';
+import {
+  CAT_CHARACTER,
+  CAT_INTACT,
+  CAT_PARTICLE,
+  CAT_WALL,
+  SHATTER_BALL_RADIUS,
+  Vec2,
+  m2px,
+  px2m,
+} from './config.js';
 import { GameObject } from './GameObject.js';
-import { Graphics } from './Renderer.js';
+import { Particle } from './Renderer.js';
+
+const PARTICLE_FIXTURE = {
+  density: 1.2,
+  friction: 0.6,
+  restitution: 0.05,
+  filterCategoryBits: CAT_PARTICLE,
+  filterMaskBits: CAT_WALL | CAT_INTACT | CAT_CHARACTER,
+};
+
+const PARTICLE_COLOR = 0xe0b26a;
+const PARTICLE_DIAM = SHATTER_BALL_RADIUS * 2;
 
 export class CirclePiece extends GameObject {
-  constructor(world, cx, cy, layer = null) {
+  /**
+   * @param {*} world
+   * @param {number} cx
+   * @param {number} cy
+   * @param {import('pixi.js').ParticleContainer | null} [layer]
+   * @param {import('pixi.js').Texture | null} [texture]
+   */
+  constructor(world, cx, cy, layer = null, texture = null) {
     super(
       world,
       {
@@ -14,16 +41,28 @@ export class CirclePiece extends GameObject {
       },
       'particle'
     );
-    this.createCircleFixture(px2m(P_D / 2), {
-      density: 1.2,
-      friction: 0.6,
-      restitution: 0.05,
-    });
+    this.layer = layer;
+    this.texture = texture;
+    this.bornAt = performance.now();
+    this.settleFrames = 0;
+    this.pooled = false;
+    this.inLayer = false;
 
-    if (layer) {
-      this.gfx = new Graphics().circle(0, 0, P_D / 2).fill(0xe0b26a);
-      this.gfx.position.set(cx, cy);
-      layer.addChild(this.gfx);
+    this.createCircleFixture(px2m(SHATTER_BALL_RADIUS), PARTICLE_FIXTURE);
+
+    if (layer && texture) {
+      this.gfx = new Particle({
+        texture,
+        x: cx,
+        y: cy,
+        anchorX: 0.5,
+        anchorY: 0.5,
+        width: PARTICLE_DIAM,
+        height: PARTICLE_DIAM,
+        tint: PARTICLE_COLOR,
+      });
+      layer.addParticle(this.gfx);
+      this.inLayer = true;
     }
   }
 
@@ -37,10 +76,107 @@ export class CirclePiece extends GameObject {
     );
   }
 
-  syncGfx() {
-    if (!this.gfx || !this.body) return;
+  reactivate(cx, cy) {
+    this.pooled = false;
+    this.bornAt = performance.now();
+    this.settleFrames = 0;
+    this.body.setActive(true);
+    this.body.setTransform(Vec2(px2m(cx), px2m(cy)), 0);
+    this.body.setLinearVelocity(Vec2(0, 0));
+    this.body.setAngularVelocity(0);
+    this.body.setAwake(true);
+    if (this.gfx) {
+      this.gfx.x = cx;
+      this.gfx.y = cy;
+      this.gfx.rotation = 0;
+      this.gfx.alpha = 1;
+      if (this.layer && !this.inLayer) {
+        this.layer.addParticle(this.gfx);
+        this.inLayer = true;
+      }
+    }
+  }
+
+  deactivate() {
+    this.pooled = true;
+    this.body.setLinearVelocity(Vec2(0, 0));
+    this.body.setAngularVelocity(0);
+    this.body.setActive(false);
+    if (this.gfx && this.layer && this.inLayer) {
+      this.layer.removeParticle(this.gfx);
+      this.inLayer = false;
+    }
+  }
+
+  /** Particle destroy: drop from ParticleContainer, don't call DisplayObject.destroy. */
+  destroyGfx() {
+    if (!this.gfx) return;
+    if (this.layer && this.inLayer) {
+      try {
+        this.layer.removeParticle(this.gfx);
+      } catch (_) {
+        /* already removed */
+      }
+      this.inLayer = false;
+    }
+    this.gfx = null;
+  }
+
+  destroy() {
+    this.destroyGfx();
+    if (!this.body) return;
+    this.world.destroyBody(this.body);
+    this.body = null;
+  }
+
+  syncGfx(viewBounds = null) {
+    if (!this.gfx || !this.body || this.pooled) return;
+    if (!this.body.isAwake()) return;
     const p = this.body.getPosition();
-    this.gfx.position.set(m2px(p.x), m2px(p.y));
+    const x = m2px(p.x);
+    const y = m2px(p.y);
+    this.gfx.x = x;
+    this.gfx.y = y;
     this.gfx.rotation = this.body.getAngle();
+    if (viewBounds) {
+      const onScreen =
+        x >= viewBounds.x0 &&
+        x <= viewBounds.x1 &&
+        y >= viewBounds.y0 &&
+        y <= viewBounds.y1;
+      this.gfx.alpha = onScreen ? 1 : 0;
+    } else {
+      this.gfx.alpha = 1;
+    }
+  }
+}
+
+/** Reuse CirclePiece bodies + Particle gfx instead of create/destroy churn. */
+export class ParticlePool {
+  constructor(world, layer = null, texture = null) {
+    this.world = world;
+    this.layer = layer;
+    this.texture = texture;
+    this.free = [];
+  }
+
+  acquire(cx, cy) {
+    const piece = this.free.pop();
+    if (piece) {
+      piece.reactivate(cx, cy);
+      return piece;
+    }
+    return new CirclePiece(this.world, cx, cy, this.layer, this.texture);
+  }
+
+  release(piece) {
+    if (!piece || piece.pooled) return;
+    piece.deactivate();
+    this.free.push(piece);
+  }
+
+  destroyAll() {
+    for (const piece of this.free) piece.destroy();
+    this.free.length = 0;
   }
 }

@@ -1,4 +1,8 @@
 import {
+  CAT_CHARACTER,
+  CAT_INTACT,
+  CAT_PARTICLE,
+  CAT_WALL,
   CHAR_SIZE,
   H,
   LASER_COOLDOWN_MS,
@@ -6,6 +10,8 @@ import {
   LASER_RANGE,
   PHYS_H,
   PHYS_W,
+  SOLVER_BUSY_DYNAMIC_COUNT,
+  VIEW_CULL_MARGIN_PX,
   Vec2,
   W,
   contentW,
@@ -14,15 +20,18 @@ import {
   pl,
   px2m,
   terrainTop,
-} from './config.js';
-import { Camera } from './Camera.js';
-import { Character } from './Character.js';
-import { FrameFps, MsMeter } from './FpsMeter.js';
-import { Renderer } from './Renderer.js';
-import { Terrain } from './Terrain.js';
+} from "./config.js";
+import { Camera } from "./Camera.js";
+import { Character } from "./Character.js";
+import { FrameFps, MsMeter } from "./FpsMeter.js";
+import { Renderer } from "./Renderer.js";
+import { Terrain } from "./Terrain.js";
+
+const WALL_MASK = CAT_WALL | CAT_INTACT | CAT_PARTICLE | CAT_CHARACTER;
 
 export class Game {
   constructor() {
+    window.game = this;
     this.renderer = null;
     this.canvas = null;
     this.world = null;
@@ -44,11 +53,12 @@ export class Game {
     this.renderMs = new MsMeter();
     this.frameFps = new FrameFps();
 
-    this.statIntact = document.getElementById('stat-intact');
-    this.statFree = document.getElementById('stat-free');
-    this.statWorldMs = document.getElementById('stat-world-ms');
-    this.statRenderMs = document.getElementById('stat-render-ms');
-    this.statFps = document.getElementById('stat-fps');
+    this.statIntact = document.getElementById("stat-intact");
+    this.statFree = document.getElementById("stat-free");
+    this.statBodies = document.getElementById("stat-bodies");
+    this.statWorldMs = document.getElementById("stat-world-ms");
+    this.statRenderMs = document.getElementById("stat-render-ms");
+    this.statFps = document.getElementById("stat-fps");
   }
 
   async init() {
@@ -65,6 +75,7 @@ export class Game {
     this.terrain = new Terrain(this.world, {
       boxes: this.renderer.boxes,
       particles: this.renderer.particles,
+      particleTexture: this.renderer.particleTexture,
     });
 
     this.bindContacts();
@@ -72,9 +83,16 @@ export class Game {
   }
 
   addWall(x, y, w, h) {
-    const b = this.world.createBody({ type: 'static', position: Vec2(px2m(x), px2m(y)) });
-    b.setUserData({ kind: 'wall' });
-    b.createFixture(pl.Box(px2m(w / 2), px2m(h / 2)), { friction: 0.6 });
+    const b = this.world.createBody({
+      type: "static",
+      position: Vec2(px2m(x), px2m(y)),
+    });
+    b.setUserData({ kind: "wall" });
+    b.createFixture(pl.Box(px2m(w / 2), px2m(h / 2)), {
+      friction: 0.6,
+      filterCategoryBits: CAT_WALL,
+      filterMaskBits: WALL_MASK,
+    });
   }
 
   kindOf(body) {
@@ -89,20 +107,20 @@ export class Game {
   }
 
   bindContacts() {
-    this.world.on('begin-contact', (contact) => {
+    this.world.on("begin-contact", (contact) => {
       const [, , ka, kb] = this.contactPair(contact);
-      if (ka === 'character' || kb === 'character') {
-        const other = ka === 'character' ? kb : ka;
-        if (other === 'wall' || other === 'intact' || other === 'particle') {
+      if (ka === "character" || kb === "character") {
+        const other = ka === "character" ? kb : ka;
+        if (other === "wall" || other === "intact" || other === "particle") {
           if (this.character) this.character.addGroundContact();
         }
       }
     });
-    this.world.on('end-contact', (contact) => {
+    this.world.on("end-contact", (contact) => {
       const [, , ka, kb] = this.contactPair(contact);
-      if (ka === 'character' || kb === 'character') {
-        const other = ka === 'character' ? kb : ka;
-        if (other === 'wall' || other === 'intact' || other === 'particle') {
+      if (ka === "character" || kb === "character") {
+        const other = ka === "character" ? kb : ka;
+        if (other === "wall" || other === "intact" || other === "particle") {
           if (this.character) this.character.removeGroundContact();
         }
       }
@@ -116,7 +134,7 @@ export class Game {
   bindInput() {
     const canvas = this.canvas;
 
-    canvas.addEventListener('pointerdown', (e) => {
+    canvas.addEventListener("pointerdown", (e) => {
       canvas.setPointerCapture(e.pointerId);
       this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       this.mouseSX = e.clientX;
@@ -132,7 +150,7 @@ export class Game {
       }
     });
 
-    canvas.addEventListener('pointermove', (e) => {
+    canvas.addEventListener("pointermove", (e) => {
       this.mouseSX = e.clientX;
       this.mouseSY = e.clientY;
       if (!this.pointers.has(e.pointerId)) return;
@@ -145,7 +163,7 @@ export class Game {
       }
     });
 
-    window.addEventListener('pointermove', (e) => {
+    window.addEventListener("pointermove", (e) => {
       this.mouseSX = e.clientX;
       this.mouseSY = e.clientY;
     });
@@ -156,35 +174,49 @@ export class Game {
       if (this.pointers.size === 0) this.firing = false;
       else if (this.pointers.size === 1) this.firing = true;
     };
-    canvas.addEventListener('pointerup', endPointer);
-    canvas.addEventListener('pointercancel', endPointer);
+    canvas.addEventListener("pointerup", endPointer);
+    canvas.addEventListener("pointercancel", endPointer);
 
     canvas.addEventListener(
-      'wheel',
+      "wheel",
       (e) => {
         e.preventDefault();
         this.camera.setZoom(e.deltaY < 0 ? 1.15 : 1 / 1.15);
       },
-      { passive: false }
+      { passive: false },
     );
 
-    window.addEventListener('keydown', (e) => {
+    window.addEventListener("keydown", (e) => {
       this.keys[e.code] = true;
       if (
-        ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(
-          e.code
-        )
+        [
+          "KeyW",
+          "KeyA",
+          "KeyS",
+          "KeyD",
+          "Space",
+          "ArrowUp",
+          "ArrowDown",
+          "ArrowLeft",
+          "ArrowRight",
+        ].includes(e.code)
       ) {
         e.preventDefault();
       }
     });
-    window.addEventListener('keyup', (e) => {
+    window.addEventListener("keyup", (e) => {
       this.keys[e.code] = false;
     });
 
-    document.getElementById('zoomin').addEventListener('click', () => this.camera.setZoom(1.35));
-    document.getElementById('zoomout').addEventListener('click', () => this.camera.setZoom(1 / 1.35));
-    document.getElementById('reset').addEventListener('click', () => this.reset());
+    document
+      .getElementById("zoomin")
+      .addEventListener("click", () => this.camera.setZoom(1.35));
+    document
+      .getElementById("zoomout")
+      .addEventListener("click", () => this.camera.setZoom(1 / 1.35));
+    document
+      .getElementById("reset")
+      .addEventListener("click", () => this.reset());
   }
 
   spawnCharacter() {
@@ -203,19 +235,23 @@ export class Game {
       this.mouseSX,
       this.mouseSY,
       this.camera,
-      this.camera.viewScale()
+      this.camera.viewScale(),
     );
     // Start at body center (not pushed along aim). Planck ignores fixtures that
     // contain p1 — a gap toward the ground put p1 inside the box underfoot, so
     // that intact node was skipped entirely.
     const p1 = this.character.body.getPosition();
-    const p2 = Vec2(p1.x + Math.cos(ang) * LASER_RANGE, p1.y + Math.sin(ang) * LASER_RANGE);
+    const p2 = Vec2(
+      p1.x + Math.cos(ang) * LASER_RANGE,
+      p1.y + Math.sin(ang) * LASER_RANGE,
+    );
 
     let closest = null;
     this.world.rayCast(p1, p2, (fixture, point, _normal, fraction) => {
       const kind = this.kindOf(fixture.getBody());
-      if (kind === 'character') return -1;
-      if (kind !== 'intact' && kind !== 'particle' && kind !== 'wall') return -1;
+      if (kind === "character") return -1;
+      if (kind !== "intact" && kind !== "particle" && kind !== "wall")
+        return -1;
       closest = { body: fixture.getBody(), kind, point, fraction };
       return fraction;
     });
@@ -230,12 +266,16 @@ export class Game {
     });
 
     if (!closest) return;
-    if (closest.kind === 'intact') {
+    if (closest.kind === "intact") {
       const data = closest.body.getUserData();
       if (data && data.gameObject) {
-        this.terrain.breakNode(data.gameObject, m2px(closest.point.x), m2px(closest.point.y));
+        this.terrain.breakNode(
+          data.gameObject,
+          m2px(closest.point.x),
+          m2px(closest.point.y),
+        );
       }
-    } else if (closest.kind === 'particle') {
+    } else if (closest.kind === "particle") {
       this.terrain.deleteParticle(closest.body);
     }
   }
@@ -256,13 +296,14 @@ export class Game {
     };
 
     this.renderer.applyCamera(this.camera);
-    this.terrain.syncGfx();
+    this.terrain.syncGfx(this.camera.viewBounds(VIEW_CULL_MARGIN_PX));
     this.renderer.drawLasers(this.lasers, vs);
     if (this.character) this.character.syncGfx(view);
     this.renderer.render();
 
     this.statIntact.textContent = this.terrain.intact.size;
     this.statFree.textContent = this.terrain.freeParticles.length;
+    this.statBodies.textContent = this.terrain.dynamicCount();
     this.statWorldMs.textContent = this.worldMs.ms.toFixed(2);
     this.statRenderMs.textContent = this.renderMs.ms.toFixed(2);
     this.statFps.textContent = this.frameFps.fps.toFixed(0);
@@ -286,7 +327,14 @@ export class Game {
       this.fireLaser();
       this.lastFireAt = t;
     }
-    this.world.step(1 / 60, 8, 3);
+    const dyn = this.terrain.dynamicCount();
+    if (dyn < SOLVER_BUSY_DYNAMIC_COUNT) {
+      this.world.step(1 / 60, 5, 2);
+    } else {
+      this.world.step(1 / 60, 4, 1);
+    }
+    this.terrain.cullParticles(t);
+    this.terrain.coalesceQuiet(this.camera.viewBounds(VIEW_CULL_MARGIN_PX));
     this.updateLasers(t);
     this.camera.follow(this.character);
     this.worldMs.end();

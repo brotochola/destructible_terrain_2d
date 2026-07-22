@@ -2,8 +2,10 @@ import {
   Application,
   Container,
   Graphics,
+  Particle,
+  ParticleContainer,
 } from 'https://cdn.jsdelivr.net/npm/pixi.js@8.19.0/dist/pixi.min.mjs';
-import { H, W } from './config.js';
+import { H, SHATTER_BALL_RADIUS, W } from './config.js';
 
 export class Renderer {
   constructor() {
@@ -11,6 +13,7 @@ export class Renderer {
     this.world = null;
     this.boxes = null;
     this.particles = null;
+    this.particleTexture = null;
     this.fx = null;
     this.actors = null;
     this.laserGfx = null;
@@ -23,7 +26,7 @@ export class Renderer {
       width: W,
       height: H,
       background: 0x0e1620,
-      antialias: true,
+      antialias: false,
       resolution: window.devicePixelRatio || 1,
       autoDensity: true,
     });
@@ -33,9 +36,23 @@ export class Renderer {
     this.canvas.id = 'c';
     document.body.appendChild(this.canvas);
 
+    const disc = new Graphics()
+      .circle(SHATTER_BALL_RADIUS, SHATTER_BALL_RADIUS, SHATTER_BALL_RADIUS)
+      .fill(0xffffff);
+    this.particleTexture = this.app.renderer.generateTexture(disc);
+    disc.destroy();
+
     this.world = new Container();
     this.boxes = new Container();
-    this.particles = new Container();
+    this.particles = new ParticleContainer({
+      texture: this.particleTexture,
+      dynamicProperties: {
+        position: true,
+        rotation: true,
+        color: false,
+        vertex: false,
+      },
+    });
     this.fx = new Container();
     this.actors = new Container();
     this.world.addChild(this.boxes, this.particles, this.fx, this.actors);
@@ -75,4 +92,4 @@ export class Renderer {
   }
 }
 
-export { Graphics, Container };
+export { Graphics, Container, Particle, ParticleContainer };

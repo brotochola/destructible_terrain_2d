@@ -1,22 +1,28 @@
 import {
   BOX_TOUCH_EPS_PX,
   LEVEL_LAYOUT,
+  MAX_FREE_PARTICLES,
+  PARTICLE_MAX_AGE_MS,
+  PARTICLE_SETTLE_FRAMES,
   SHATTER_BALL_COUNT,
   SHATTER_KICK_MAX,
   SHATTER_KICK_MIN,
   Vec2,
   m2px,
-  orderSize,
   originX,
   pl,
   px2m,
   terrainTop,
 } from './config.js';
 import { Box } from './Box.js';
-import { CirclePiece } from './CirclePiece.js';
+import { CirclePiece, ParticlePool } from './CirclePiece.js';
 
 function nodeKey(box) {
   return box.rootId + '_' + box.order + '_' + box.gx + '_' + box.gy;
+}
+
+function keyAt(rootId, order, gx, gy) {
+  return rootId + '_' + order + '_' + gx + '_' + gy;
 }
 
 /** Axis-aligned bounds from current body center (ignores rotation). */
@@ -89,6 +95,13 @@ function childPlacement(pose, parentSize, dx, dy) {
   };
 }
 
+const NEIGHBOR_DIRS = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
+
 export class Terrain {
   /**
    * @param {*} world Planck world
@@ -98,9 +111,36 @@ export class Terrain {
     this.world = world;
     this.boxLayer = layers && layers.boxes;
     this.particleLayer = layers && layers.particles;
+    this.particleTexture = layers && layers.particleTexture;
     this.intact = new Map();
+    this.dynamicIntact = new Set();
     this.freeParticles = [];
+    this.particlePool = new ParticlePool(
+      world,
+      this.particleLayer,
+      this.particleTexture
+    );
     this._nextRootId = 0;
+    this._coalesceCursor = 0;
+  }
+
+  dynamicCount() {
+    return this.dynamicIntact.size + this.freeParticles.length;
+  }
+
+  weldToNeighbors(box) {
+    for (const [dx, dy] of NEIGHBOR_DIRS) {
+      const other = this.intact.get(keyAt(box.rootId, box.order, box.gx + dx, box.gy + dy));
+      if (!other || !other.isDynamic || other === box) continue;
+      weldBoxes(this.world, box, other);
+    }
+    // Cross-order / odd edges: only scan other dynamics (small set).
+    for (const other of this.dynamicIntact) {
+      if (other === box) continue;
+      if (other.rootId === box.rootId && other.order === box.order) continue;
+      if (!boxesTouch(box, other, BOX_TOUCH_EPS_PX)) continue;
+      weldBoxes(this.world, box, other);
+    }
   }
 
   createNode(order, x, y, gx, gy, rootId, angle = 0, velocity = null) {
@@ -121,11 +161,8 @@ export class Terrain {
     }
     this.intact.set(nodeKey(box), box);
     if (box.isDynamic) {
-      for (const other of this.intact.values()) {
-        if (other === box) continue;
-        if (!boxesTouch(box, other, BOX_TOUCH_EPS_PX)) continue;
-        weldBoxes(this.world, box, other);
-      }
+      this.dynamicIntact.add(box);
+      this.weldToNeighbors(box);
     }
     return box;
   }
@@ -138,6 +175,13 @@ export class Terrain {
   initFromLayout() {
     for (const item of LEVEL_LAYOUT) {
       this.addRoot(item);
+    }
+  }
+
+  enforceParticleCap() {
+    while (this.freeParticles.length > MAX_FREE_PARTICLES) {
+      const oldest = this.freeParticles.shift();
+      this.particlePool.release(oldest);
     }
   }
 
@@ -158,24 +202,19 @@ export class Terrain {
       const ly = -half + (row + 0.5) * cellH;
       const cx = pose.cx + lx * cos - ly * sin;
       const cy = pose.cy + lx * sin + ly * cos;
-      const piece = new CirclePiece(this.world, cx, cy, this.particleLayer);
+      const piece = this.particlePool.acquire(cx, cy);
       this.freeParticles.push(piece);
       piece.kick(SHATTER_KICK_MIN, SHATTER_KICK_MAX);
     }
+    this.enforceParticleCap();
   }
 
   breakNode(node, ix, iy) {
     if (!this.intact.has(nodeKey(node))) return;
 
     const pose = readPose(node);
-    let impactDx = 0;
-    let impactDy = 0;
-    if (ix !== undefined && iy !== undefined) {
-      const local = node.body.getLocalPoint(Vec2(px2m(ix), px2m(iy)));
-      impactDx = local.x >= 0 ? 1 : 0;
-      impactDy = local.y >= 0 ? 1 : 0;
-    }
 
+    this.dynamicIntact.delete(node);
     node.destroy();
     this.intact.delete(nodeKey(node));
 
@@ -190,11 +229,11 @@ export class Terrain {
       vy: pose.vy,
       omega: pose.omega,
     };
-    let impactChild = null;
+    // One subdivision level per laser hit (no recurse to leaf).
     for (let dx = 0; dx < 2; dx++) {
       for (let dy = 0; dy < 2; dy++) {
         const place = childPlacement(pose, node.size, dx, dy);
-        const child = this.createNode(
+        this.createNode(
           childOrder,
           place.x,
           place.y,
@@ -204,10 +243,78 @@ export class Terrain {
           pose.angle,
           velocity
         );
-        if (dx === impactDx && dy === impactDy) impactChild = child;
       }
     }
-    if (impactChild && ix !== undefined) this.breakNode(impactChild, ix, iy);
+  }
+
+  /**
+   * If 4 static siblings form a full parent quad and sit off-camera, merge into
+   * one parent node (same filled area, fewer fixtures).
+   */
+  tryCoalesceSiblingGroup(a) {
+    if (!a || a.isDynamic || a.gx % 2 !== 0 || a.gy % 2 !== 0) return false;
+    const { rootId, order, gx, gy } = a;
+    const b = this.intact.get(keyAt(rootId, order, gx + 1, gy));
+    const c = this.intact.get(keyAt(rootId, order, gx, gy + 1));
+    const d = this.intact.get(keyAt(rootId, order, gx + 1, gy + 1));
+    if (!b || !c || !d) return false;
+    if (b.isDynamic || c.isDynamic || d.isDynamic) return false;
+    // Static mamushka cells stay axis-aligned; skip if any drifted somehow.
+    if (a.body.getAngle() || b.body.getAngle() || c.body.getAngle() || d.body.getAngle()) {
+      return false;
+    }
+
+    const parentOrder = order + 1;
+    const parentGx = gx >> 1;
+    const parentGy = gy >> 1;
+    const parentX = a.x;
+    const parentY = a.y;
+
+    for (const sib of [a, b, c, d]) {
+      this.dynamicIntact.delete(sib);
+      this.intact.delete(nodeKey(sib));
+      sib.destroy();
+    }
+
+    this.createNode(parentOrder, parentX, parentY, parentGx, parentGy, rootId, 0);
+    return true;
+  }
+
+  /** Scan a few intact nodes per call; only coalesce quads fully outside view. */
+  coalesceQuiet(viewBounds, budget = 4) {
+    if (!viewBounds || this.intact.size < 4) return;
+
+    const candidates = [];
+    let idx = 0;
+    const start = this._coalesceCursor;
+    const maxScan = 32;
+
+    for (const box of this.intact.values()) {
+      if (idx++ < start) continue;
+      if (
+        !box.isDynamic &&
+        (box.gx & 1) === 0 &&
+        (box.gy & 1) === 0
+      ) {
+        const parentSize = box.size * 2;
+        const x0 = box.x;
+        const y0 = box.y;
+        const overlapsView = !(
+          x0 + parentSize < viewBounds.x0 ||
+          x0 > viewBounds.x1 ||
+          y0 + parentSize < viewBounds.y0 ||
+          y0 > viewBounds.y1
+        );
+        if (!overlapsView) candidates.push(box);
+      }
+      if (candidates.length >= budget || idx - start >= maxScan) break;
+    }
+
+    this._coalesceCursor = idx >= this.intact.size ? 0 : idx;
+
+    for (const box of candidates) {
+      if (this.intact.has(nodeKey(box))) this.tryCoalesceSiblingGroup(box);
+    }
   }
 
   deleteParticle(pieceOrBody) {
@@ -218,15 +325,32 @@ export class Terrain {
     if (!piece) return;
     const idx = this.freeParticles.indexOf(piece);
     if (idx < 0) return;
-    piece.destroy();
     this.freeParticles.splice(idx, 1);
+    this.particlePool.release(piece);
+  }
+
+  /** Despawn aged / settled particles; release into pool. */
+  cullParticles(now) {
+    for (let i = this.freeParticles.length - 1; i >= 0; i--) {
+      const piece = this.freeParticles[i];
+      if (piece.body && !piece.body.isAwake()) piece.settleFrames++;
+      else piece.settleFrames = 0;
+
+      const aged = now - piece.bornAt >= PARTICLE_MAX_AGE_MS;
+      const settled = piece.settleFrames >= PARTICLE_SETTLE_FRAMES;
+      if (!aged && !settled) continue;
+      this.freeParticles.splice(i, 1);
+      this.particlePool.release(piece);
+    }
   }
 
   clear() {
     for (const node of this.intact.values()) node.destroy();
     this.intact.clear();
+    this.dynamicIntact.clear();
     for (const piece of this.freeParticles) piece.destroy();
     this.freeParticles.length = 0;
+    this.particlePool.destroyAll();
     this._nextRootId = 0;
   }
 
@@ -235,12 +359,15 @@ export class Terrain {
     this.initFromLayout();
   }
 
-  syncGfx() {
-    for (const node of this.intact.values()) {
-      if (node.isDynamic) node.syncGfx();
+  syncGfx(viewBounds = null) {
+    for (const node of this.dynamicIntact) {
+      node.syncGfx();
     }
     for (const piece of this.freeParticles) {
-      piece.syncGfx();
+      piece.syncGfx(viewBounds);
+    }
+    if (this.particleLayer && typeof this.particleLayer.update === 'function') {
+      this.particleLayer.update();
     }
   }
 }

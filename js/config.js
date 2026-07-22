@@ -71,16 +71,18 @@ export const JUMP_IMPULSE = px2m(48);
 export const FAST_FALL_IMPULSE = px2m(8);
 export const LASER_RANGE = px2m(800);
 export const LASER_FLASH_MS = 100;
-export const LASER_COOLDOWN_MS = 10;
+export const LASER_COOLDOWN_MS = 1;
 
 /** Balls spawned when an order-1 box shatters. */
 export const SHATTER_BALL_COUNT = 3;
+/** Shatter ball radius in px (diameter defaults to leaf size P_D). */
+export const SHATTER_BALL_RADIUS = P_D / 3;
 /** Impulse magnitude range (px-equivalent) applied to each shatter ball. */
 export const SHATTER_KICK_MIN = 0;
 export const SHATTER_KICK_MAX = 50;
 
 /** Order ≤ this → dynamic body + WeldJoint to neighbors. */
-export const DYNAMIC_MAX_ORDER = 4;
+export const DYNAMIC_MAX_ORDER = 1;
 export const BOX_DENSITY = 1.0;
 export const BOX_FRICTION = 0.9;
 export const BOX_RESTITUTION = 0;
@@ -89,7 +91,19 @@ export const BOX_ANGULAR_DAMPING = 0.1;
 /** AABB touch tolerance (world px) when finding weld neighbors. */
 export const BOX_TOUCH_EPS_PX = 1;
 
-export const MIN_ZOOM = 0.15;
+/** Collision categories (Planck / Box2D filter). */
+export const CAT_WALL = 0x0001;
+export const CAT_INTACT = 0x0002;
+export const CAT_PARTICLE = 0x0004;
+export const CAT_CHARACTER = 0x0008;
+
+export const MAX_FREE_PARTICLES = 800;
+export const PARTICLE_MAX_AGE_MS = 12000;
+export const PARTICLE_SETTLE_FRAMES = 90;
+export const VIEW_CULL_MARGIN_PX = 120;
+export const SOLVER_BUSY_DYNAMIC_COUNT = 200;
+
+export const MIN_ZOOM = 0.33;
 export const MAX_ZOOM = 12;
 
 export const pl = window.planck;
