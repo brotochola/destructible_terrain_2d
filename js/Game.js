@@ -18,6 +18,7 @@ import {
   contentW,
   m2px,
   originX,
+  particleTunables,
   pl,
   px2m,
   terrainTop,
@@ -62,7 +63,9 @@ export class Game {
     this.statFps = document.getElementById("stat-fps");
     this.statJoints = document.getElementById("stat-joints");
     this.debugPhys = false;
+    this.debugOnly = false;
     this.debugCheckbox = document.getElementById("debug-phys");
+    this.debugOnlyCheckbox = document.getElementById("debug-only");
     this.debugLegend = document.getElementById("debug-legend");
     this._hudIntact = -1;
     this._hudFree = -1;
@@ -88,7 +91,8 @@ export class Game {
       particles: this.renderer.particles,
       particleBuckets: this.renderer.particleBuckets,
       particleTextures: this.renderer.particleTextures,
-      rockTexture: this.renderer.rockTexture,
+      rockTexturesByOrder: this.renderer.rockTexturesByOrder,
+      rockMushRecipes: this.renderer.rockMushRecipes,
     });
 
     this.bindContacts();
@@ -209,6 +213,11 @@ export class Game {
         if (!this.debugPhys) {
           this.renderer.clearDebug();
           if (this.statJoints) this.statJoints.textContent = "0";
+          if (this.debugOnly) {
+            this.debugOnly = false;
+            if (this.debugOnlyCheckbox) this.debugOnlyCheckbox.checked = false;
+            this.renderer.setSpritesVisible(true);
+          }
         }
         return;
       }
@@ -249,9 +258,68 @@ export class Game {
         if (!this.debugPhys) {
           this.renderer.clearDebug();
           if (this.statJoints) this.statJoints.textContent = "0";
+          // Can't stay "debug only" with physics debug off.
+          if (this.debugOnly) {
+            this.debugOnly = false;
+            if (this.debugOnlyCheckbox) this.debugOnlyCheckbox.checked = false;
+            this.renderer.setSpritesVisible(true);
+          }
         }
       });
     }
+
+    if (this.debugOnlyCheckbox) {
+      this.debugOnlyCheckbox.addEventListener("change", () => {
+        this.debugOnly = this.debugOnlyCheckbox.checked;
+        this.renderer.setSpritesVisible(!this.debugOnly);
+        if (this.debugOnly) {
+          this.debugPhys = true;
+          if (this.debugCheckbox) this.debugCheckbox.checked = true;
+          if (this.debugLegend) this.debugLegend.hidden = false;
+        }
+      });
+    }
+
+    this.bindParticleTunables();
+  }
+
+  bindParticleTunables() {
+    const collideEl = document.getElementById("particle-collide");
+    const maxEl = document.getElementById("max-particles");
+    const settleEl = document.getElementById("settle-frames");
+    const ageEl = document.getElementById("particle-age");
+
+    if (collideEl) {
+      collideEl.checked = particleTunables.collide;
+      collideEl.addEventListener("change", () => {
+        particleTunables.collide = collideEl.checked;
+        if (this.terrain) this.terrain.setParticleCollide(particleTunables.collide);
+      });
+    }
+
+    const bindNum = (el, key, { min = 0, max = 1e9, onChange } = {}) => {
+      if (!el) return;
+      el.value = String(particleTunables[key]);
+      const apply = () => {
+        let n = Number(el.value);
+        if (!Number.isFinite(n)) n = particleTunables[key];
+        n = Math.max(min, Math.min(max, n | 0));
+        el.value = String(n);
+        particleTunables[key] = n;
+        if (onChange) onChange(n);
+      };
+      el.addEventListener("change", apply);
+    };
+
+    bindNum(maxEl, "maxFree", {
+      min: 1,
+      max: 5000,
+      onChange: () => {
+        if (this.terrain) this.terrain.enforceParticleCap();
+      },
+    });
+    bindNum(settleEl, "settleFrames", { min: 0, max: 600 });
+    bindNum(ageEl, "maxAgeMs", { min: 0, max: 120000 });
   }
 
   spawnCharacter() {

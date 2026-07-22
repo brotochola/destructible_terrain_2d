@@ -11,6 +11,12 @@ button:hover { background: #385; }
   border-radius: 2px; background: var(--c); vertical-align: -1px;
 }
 #ui .swatch:first-child { margin-left: 0; }
+#ui .tunables { margin-top: 4px; }
+#ui .tunables label { display: inline-flex; align-items: center; gap: 6px; margin: 2px 10px 2px 0; }
+#ui .tunables input[type="number"] {
+  width: 72px; background: #1a2430; color: #cfe8ff; border: 1px solid #3a4a5a;
+  border-radius: 4px; padding: 2px 4px; font-size: 12px;
+}
 #zoomctl { position: fixed; bottom: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; }
 #zoomctl button { width: 44px; height: 44px; font-size: 22px; border-radius: 50%; margin: 0; background: #1b2733cc; border: 1px solid #3a5; }
 canvas { display: block; cursor: crosshair; touch-action: none; }

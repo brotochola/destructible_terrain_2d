@@ -3,10 +3,8 @@ import {
   CULL_CELL_PX,
   CULL_DIRTY_PX,
   LEVEL_LAYOUT,
-  MAX_FREE_PARTICLES,
   MAX_MAMUSHKA_ORDER,
-  PARTICLE_MAX_AGE_MS,
-  PARTICLE_SETTLE_FRAMES,
+  particleTunables,
   SHATTER_BALL_COUNT,
   SHATTER_KICK_MAX,
   SHATTER_KICK_MIN,
@@ -20,6 +18,7 @@ import {
 import { Box } from "./Box.js";
 import { CirclePiece, ParticlePool } from "./CirclePiece.js";
 import { SpatialHash } from "./SpatialHash.js";
+import { pickMush, resolveMushHint } from "./rockMush.js";
 
 function nodeKey(box) {
   return box.rootId + "_" + box.order + "_" + box.gx + "_" + box.gy;
@@ -125,43 +124,6 @@ function boxesTouch(a, b, eps) {
   );
 }
 
-/** Interval along shared face (layout px). Horizontal faces → X; vertical → Y. */
-function edgeAlongInterval(box, dx, dy) {
-  if (dx !== 0) {
-    return { a0: box.layoutY, a1: box.layoutY + box.size };
-  }
-  return { a0: box.layoutX, a1: box.layoutX + box.size };
-}
-
-function mergeIntervals(intervals, eps) {
-  if (!intervals.length) return [];
-  const sorted = intervals.slice().sort((u, v) => u.a0 - v.a0);
-  const out = [{ a0: sorted[0].a0, a1: sorted[0].a1 }];
-  for (let i = 1; i < sorted.length; i++) {
-    const iv = sorted[i];
-    const last = out[out.length - 1];
-    if (iv.a0 <= last.a1 + eps) last.a1 = Math.max(last.a1, iv.a1);
-    else out.push({ a0: iv.a0, a1: iv.a1 });
-  }
-  return out;
-}
-
-/** Gaps on [a0,a1] not covered by `covered` intervals. */
-function uncoveredGaps(a0, a1, covered, eps) {
-  const merged = mergeIntervals(covered, eps);
-  const gaps = [];
-  let cur = a0;
-  for (const iv of merged) {
-    const lo = Math.max(iv.a0, a0);
-    const hi = Math.min(iv.a1, a1);
-    if (hi <= lo + eps) continue;
-    if (lo > cur + eps) gaps.push({ a0: cur, a1: Math.min(lo, a1) });
-    cur = Math.max(cur, hi);
-  }
-  if (cur < a1 - eps) gaps.push({ a0: cur, a1: a1 });
-  return gaps;
-}
-
 function weldBoxes(world, a, b) {
   const A = aabbOf(a);
   const B = aabbOf(b);
@@ -223,7 +185,7 @@ const NEIGHBOR_DIRS = [
 export class Terrain {
   /**
    * @param {*} world Planck world
-   * @param {{ boxes: import('pixi.js').Container, particles: import('pixi.js').Container, particleBuckets?: import('pixi.js').ParticleContainer[], particleTextures?: import('pixi.js').Texture[], rockTexture?: import('pixi.js').Texture }} layers
+   * @param {{ boxes: import('pixi.js').Container, particles: import('pixi.js').Container, particleBuckets?: import('pixi.js').ParticleContainer[], particleTextures?: import('pixi.js').Texture[], rockTexturesByOrder?: import('pixi.js').Texture[][], rockMushRecipes?: { variant: number, rot: number }[][][] }} layers
    */
   constructor(world, layers = null) {
     this.world = world;
@@ -231,7 +193,8 @@ export class Terrain {
     this.particleLayer = layers && layers.particles;
     this.particleBuckets = (layers && layers.particleBuckets) || null;
     this.particleTextures = layers && layers.particleTextures;
-    this.rockTexture = layers && layers.rockTexture;
+    this.rockTexturesByOrder = layers && layers.rockTexturesByOrder;
+    this.rockMushRecipes = layers && layers.rockMushRecipes;
     this.intact = new Map();
     this.dynamicIntact = new Set();
     this.freeParticles = [];
@@ -281,107 +244,35 @@ export class Terrain {
   }
 
   /**
-   * Uncovered layout intervals on a face. Empty = fully sealed (flush, no stroke).
-   * Partial dig → only the hole segments jag/stroke (no runaway full-edge lines).
+   * @param {number} order
+   * @param {number} x
+   * @param {number} y
+   * @param {number} gx
+   * @param {number} gy
+   * @param {number|string} rootId
+   * @param {number} [angle]
+   * @param {{ vx: number, vy: number, omega: number } | null} [velocity]
+   * @param {{ variant: number, rot: number } | null} [mushHint] from parent recipe on break
    */
-  getFaceGaps(box, dx, dy) {
-    const target = edgeAlongInterval(box, dx, dy);
-    const eps = BOX_TOUCH_EPS_PX;
-    const covered = [];
-
-    const neighbors = faceNeighbors(
-      this.intact,
-      box.rootId,
-      box.order,
-      box.gx,
-      box.gy,
-      dx,
-      dy
-    );
-    for (const n of neighbors) {
-      if (n.order >= box.order) return [];
-      covered.push(edgeAlongInterval(n, dx, dy));
+  createNode(
+    order,
+    x,
+    y,
+    gx,
+    gy,
+    rootId,
+    angle = 0,
+    velocity = null,
+    mushHint = null,
+  ) {
+    const mush = mushHint
+      ? resolveMushHint(this.rockTexturesByOrder, order, mushHint)
+      : pickMush(this.rockTexturesByOrder, order, rootId, gx, gy);
+    if (this.boxLayer && (!mush || !mush.texture)) {
+      throw new Error(
+        `rock mush texture missing for order ${order} (bake / pick failed)`,
+      );
     }
-
-    const A = aabbOf(box);
-    for (const other of this.intact.values()) {
-      if (other === box || other.rootId === box.rootId) continue;
-      if (!boxesTouch(box, other, eps)) continue;
-      const B = aabbOf(other);
-      let onFace = false;
-      if (dx === 1 && B.x + eps >= A.x + A.size) onFace = true;
-      if (dx === -1 && B.x + B.size <= A.x + eps) onFace = true;
-      if (dy === 1 && B.y + eps >= A.y + A.size) onFace = true;
-      if (dy === -1 && B.y + B.size <= A.y + eps) onFace = true;
-      if (!onFace) continue;
-      if (other.order >= box.order) return [];
-      covered.push(edgeAlongInterval(other, dx, dy));
-    }
-
-    return uncoveredGaps(target.a0, target.a1, covered, eps);
-  }
-
-  refreshRockEdges(box) {
-    if (!box || !box.applyRockSilhouette) return;
-    box.applyRockSilhouette({
-      right: this.getFaceGaps(box, 1, 0),
-      left: this.getFaceGaps(box, -1, 0),
-      bottom: this.getFaceGaps(box, 0, 1),
-      top: this.getFaceGaps(box, 0, -1),
-    });
-  }
-
-  refreshNeighborRockEdges(box) {
-    for (const [dx, dy] of NEIGHBOR_DIRS) {
-      for (const n of faceNeighbors(
-        this.intact,
-        box.rootId,
-        box.order,
-        box.gx,
-        box.gy,
-        dx,
-        dy,
-      )) {
-        this.refreshRockEdges(n);
-      }
-    }
-    for (const other of this.intact.values()) {
-      if (other === box || other.rootId === box.rootId) continue;
-      if (!boxesTouch(box, other, BOX_TOUCH_EPS_PX)) continue;
-      this.refreshRockEdges(other);
-    }
-  }
-
-  /** Neighbors that share a face — refresh after this node is removed. */
-  collectTouching(box) {
-    const out = [];
-    const seen = new Set();
-    for (const [dx, dy] of NEIGHBOR_DIRS) {
-      for (const n of faceNeighbors(
-        this.intact,
-        box.rootId,
-        box.order,
-        box.gx,
-        box.gy,
-        dx,
-        dy,
-      )) {
-        if (n === box || seen.has(n)) continue;
-        seen.add(n);
-        out.push(n);
-      }
-    }
-    for (const other of this.intact.values()) {
-      if (other === box || other.rootId === box.rootId || seen.has(other))
-        continue;
-      if (!boxesTouch(box, other, BOX_TOUCH_EPS_PX)) continue;
-      seen.add(other);
-      out.push(other);
-    }
-    return out;
-  }
-
-  createNode(order, x, y, gx, gy, rootId, angle = 0, velocity = null, visual = null) {
     const box = new Box(
       this.world,
       order,
@@ -392,8 +283,9 @@ export class Terrain {
       rootId,
       this.boxLayer,
       angle,
-      this.rockTexture,
-      visual,
+      mush ? mush.texture : null,
+      mush ? mush.variant : 0,
+      mush ? mush.texRot : 0,
     );
     if (velocity && box.isDynamic && box.body) {
       box.body.setLinearVelocity(Vec2(velocity.vx, velocity.vy));
@@ -403,8 +295,6 @@ export class Terrain {
     if (box.isDynamic) this.dynamicIntact.add(box);
     this.cullHash.insert(box);
     this.weldToNeighbors(box);
-    this.refreshRockEdges(box);
-    this.refreshNeighborRockEdges(box);
     return box;
   }
 
@@ -420,10 +310,16 @@ export class Terrain {
   }
 
   enforceParticleCap() {
-    while (this.freeParticles.length > MAX_FREE_PARTICLES) {
+    while (this.freeParticles.length > particleTunables.maxFree) {
       const oldest = this.freeParticles.shift();
       this.particlePool.release(oldest);
     }
+  }
+
+  /** Apply particle↔particle collide bit to live + pooled pieces. */
+  setParticleCollide(on) {
+    for (const piece of this.freeParticles) piece.setCollideParticles(on);
+    for (const piece of this.particlePool.free) piece.setCollideParticles(on);
   }
 
   shatterToParticles(node, pose) {
@@ -454,64 +350,55 @@ export class Terrain {
     if (!this.intact.has(nodeKey(node))) return;
 
     const pose = readPose(node);
-    const around = this.collectTouching(node);
 
     this.dynamicIntact.delete(node);
     this.cullHash.remove(node);
     this._cullOn.delete(node);
-    // Snapshot visual before destroy — children inherit tile UV + edge seed/layout.
-    const parentVisual = {
-      tilePosX: node.tilePosX,
-      tilePosY: node.tilePosY,
-      layoutX: node.layoutX,
-      layoutY: node.layoutY,
-      edgeSeed: node.edgeSeed,
-      size: node.size,
-    };
+    const parentSize = node.size;
+    const parentGx = node.gx;
+    const parentGy = node.gy;
+    const parentOrder = node.order;
+    const parentMushVariant = node.mushVariant;
+    const rootId = node.rootId;
+    const shatter = parentOrder === 1;
     node.destroy();
     this.intact.delete(nodeKey(node));
 
-    if (node.order === 1) {
-      this.shatterToParticles(node, pose);
-      for (const n of around) {
-        if (this.intact.has(nodeKey(n))) this.refreshRockEdges(n);
-      }
+    if (shatter) {
+      this.shatterToParticles({ size: parentSize }, pose);
       return;
     }
 
-    const childOrder = node.order - 1;
-    const childSize = parentVisual.size / 2;
+    const childOrder = parentOrder - 1;
     const velocity = {
       vx: pose.vx,
       vy: pose.vy,
       omega: pose.omega,
     };
+    const parentRecipes =
+      this.rockMushRecipes && this.rockMushRecipes[parentOrder];
+    const parentRecipe =
+      parentRecipes && parentRecipes[parentMushVariant];
     // One subdivision level per laser hit (no recurse to leaf).
     for (let dx = 0; dx < 2; dx++) {
       for (let dy = 0; dy < 2; dy++) {
-        const place = childPlacement(pose, parentVisual.size, dx, dy);
-        const visual = {
-          tilePosX: parentVisual.tilePosX - dx * childSize,
-          tilePosY: parentVisual.tilePosY - dy * childSize,
-          layoutX: parentVisual.layoutX + dx * childSize,
-          layoutY: parentVisual.layoutY + dy * childSize,
-          edgeSeed: parentVisual.edgeSeed,
-        };
+        const place = childPlacement(pose, parentSize, dx, dy);
+        const mushHint =
+          parentRecipe && parentRecipe[dy * 2 + dx]
+            ? parentRecipe[dy * 2 + dx]
+            : null;
         this.createNode(
           childOrder,
           place.x,
           place.y,
-          node.gx * 2 + dx,
-          node.gy * 2 + dy,
-          node.rootId,
+          parentGx * 2 + dx,
+          parentGy * 2 + dy,
+          rootId,
           pose.angle,
           velocity,
-          visual,
+          mushHint,
         );
       }
-    }
-    for (const n of around) {
-      if (this.intact.has(nodeKey(n))) this.refreshRockEdges(n);
     }
   }
 
@@ -542,7 +429,6 @@ export class Terrain {
     const parentGy = gy >> 1;
     const parentX = a.x;
     const parentY = a.y;
-    const visual = a.visualAsParent();
 
     for (const sib of [a, b, c, d]) {
       this.dynamicIntact.delete(sib);
@@ -561,7 +447,6 @@ export class Terrain {
       rootId,
       0,
       null,
-      visual,
     );
     return true;
   }
@@ -618,8 +503,12 @@ export class Terrain {
       if (piece.body && !piece.body.isAwake()) piece.settleFrames++;
       else piece.settleFrames = 0;
 
-      const aged = now - piece.bornAt >= PARTICLE_MAX_AGE_MS;
-      const settled = piece.settleFrames >= PARTICLE_SETTLE_FRAMES;
+      const aged =
+        particleTunables.maxAgeMs > 0 &&
+        now - piece.bornAt >= particleTunables.maxAgeMs;
+      const settled =
+        particleTunables.settleFrames > 0 &&
+        piece.settleFrames >= particleTunables.settleFrames;
       if (!aged && !settled) continue;
       this.freeParticles.splice(i, 1);
       this.particlePool.release(piece);

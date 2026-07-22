@@ -16,7 +16,8 @@
   Nodos vivos: <span id="stat-intact">0</span> · Partículas libres: <span id="stat-free">0</span> · Dinámicos: <span id="stat-bodies">0</span><br>
   World: <span id="stat-world-ms">0</span> ms · Render: <span id="stat-render-ms">0</span> ms · FPS: <span id="stat-fps">0</span><br>
   Joints: <span id="stat-joints">0</span>
-  <label class="dbg"><input type="checkbox" id="debug-phys"> Debug physics</label><br>
+  <label class="dbg"><input type="checkbox" id="debug-phys"> Debug physics</label>
+  <label class="dbg"><input type="checkbox" id="debug-only"> Debug only (no sprites)</label><br>
   <span id="debug-legend" class="legend" hidden>
     <span class="swatch" style="--c:#6af"></span> static
     <span class="swatch" style="--c:#fa6"></span> dynamic
@@ -25,6 +26,12 @@
     <span class="swatch" style="--c:#888"></span> wall
     <span class="swatch" style="--c:#ff0"></span> joint
   </span>
+  <div class="tunables">
+    <label class="dbg"><input type="checkbox" id="particle-collide"> Particle collide</label><br>
+    <label>Max particles <input type="number" id="max-particles" min="1" max="5000" step="50" value="800"></label>
+    <label>Settle frames <input type="number" id="settle-frames" min="0" max="600" step="10" value="90" title="0 = never settle-cull"></label>
+    <label>Max age ms <input type="number" id="particle-age" min="0" max="120000" step="1000" value="12000" title="0 = never age-cull"></label>
+  </div>
   <button id="reset">Reset</button>
 </div>
 <div id="zoomctl">

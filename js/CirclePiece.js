@@ -3,6 +3,7 @@ import {
   CAT_INTACT,
   CAT_PARTICLE,
   CAT_WALL,
+  particleTunables,
   SHATTER_BALL_RADIUS,
   Vec2,
   m2px,
@@ -11,12 +12,18 @@ import {
 import { GameObject } from "./GameObject.js";
 import { Particle } from "./Renderer.js";
 
+const PARTICLE_BASE_MASK = CAT_WALL | CAT_INTACT | CAT_CHARACTER;
+
+function particleMask(collide = particleTunables.collide) {
+  return collide ? PARTICLE_BASE_MASK | CAT_PARTICLE : PARTICLE_BASE_MASK;
+}
+
 const PARTICLE_FIXTURE = {
   density: 1.2,
   friction: 0.6,
   restitution: 0.05,
   filterCategoryBits: CAT_PARTICLE,
-  filterMaskBits: CAT_WALL | CAT_INTACT | CAT_CHARACTER,
+  filterMaskBits: PARTICLE_BASE_MASK,
 };
 
 const PARTICLE_DIAM = SHATTER_BALL_RADIUS * 2;
@@ -24,7 +31,7 @@ const PARTICLE_DIAM = SHATTER_BALL_RADIUS * 2;
 function rockScale(texture) {
   const tw = texture.width || 1;
   const th = texture.height || 1;
-  return PARTICLE_DIAM / Math.max(tw, th);
+  return (PARTICLE_DIAM * 1.3) / Math.max(tw, th);
 }
 
 /**
@@ -54,7 +61,10 @@ export class CirclePiece extends GameObject {
     this.bucket = null;
     this._baseScale = 1;
 
-    this.createCircleFixture(px2m(SHATTER_BALL_RADIUS), PARTICLE_FIXTURE);
+    this.createCircleFixture(px2m(SHATTER_BALL_RADIUS), {
+      ...PARTICLE_FIXTURE,
+      filterMaskBits: particleMask(),
+    });
 
     if (buckets && textures && textures.length) {
       this.texIndex = (Math.random() * textures.length) | 0;
@@ -75,6 +85,16 @@ export class CirclePiece extends GameObject {
       this.bucket.addParticle(this.gfx);
       this.inLayer = true;
     }
+  }
+
+  /** Update particle↔particle bit on live fixture (toggle mid-game). */
+  setCollideParticles(on) {
+    if (!this.body) return;
+    const mask = particleMask(on);
+    for (let f = this.body.getFixtureList(); f; f = f.getNext()) {
+      f.setFilterMaskBits(mask);
+    }
+    if (on && this.body.isActive()) this.body.setAwake(true);
   }
 
   kick(minPx, maxPx) {

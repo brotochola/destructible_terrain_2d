@@ -6,9 +6,19 @@ import {
   Particle,
   ParticleContainer,
   Sprite,
+  Texture,
   TilingSprite,
 } from 'https://cdn.jsdelivr.net/npm/pixi.js@8.19.0/dist/pixi.min.mjs';
-import { H, ROCK_PARTICLE_URLS, ROCK_TEXTURE_URL, W, m2px } from './config.js';
+import {
+  H,
+  MAX_PACK_ORDER,
+  ROCK_BOX_URL,
+  ROCK_MUSH_SEED,
+  ROCK_PARTICLE_URLS,
+  W,
+  m2px,
+} from './config.js';
+import { bakeRockMushTextures } from './rockMush.js';
 
 const DEBUG_COLORS = {
   wall: 0x888888,
@@ -28,7 +38,10 @@ export class Renderer {
     this.particles = null;
     this.particleTextures = null;
     this.particleBuckets = null;
-    this.rockTexture = null;
+    /** @type {import('pixi.js').Texture[][] | null} */
+    this.rockTexturesByOrder = null;
+    /** @type {{ variant: number, rot: number }[][][] | null} */
+    this.rockMushRecipes = null;
     this.fx = null;
     this.actors = null;
     this.laserGfx = null;
@@ -52,13 +65,16 @@ export class Renderer {
     this.canvas.id = 'c';
     document.body.appendChild(this.canvas);
 
-    this.rockTexture = await Assets.load(ROCK_TEXTURE_URL);
-    this.rockTexture.source.addressModeU = 'repeat';
-    this.rockTexture.source.addressModeV = 'repeat';
-
     this.particleTextures = await Promise.all(
       ROCK_PARTICLE_URLS.map((url) => Assets.load(url))
     );
+    const boxTexture = await Assets.load(ROCK_BOX_URL);
+    const baked = bakeRockMushTextures(boxTexture, {
+      maxOrder: MAX_PACK_ORDER,
+      seed: ROCK_MUSH_SEED,
+    });
+    this.rockTexturesByOrder = baked.byOrder;
+    this.rockMushRecipes = baked.recipes;
 
     this.world = new Container();
     this.boxes = new Container();
@@ -122,6 +138,14 @@ export class Renderer {
 
   clearDebug() {
     this.debugGfx.clear();
+  }
+
+  /** Hide boxes/particles/fx/actors; debugGfx stays. */
+  setSpritesVisible(visible) {
+    this.boxes.visible = visible;
+    this.particles.visible = visible;
+    this.fx.visible = visible;
+    this.actors.visible = visible;
   }
 
   /**
@@ -210,4 +234,4 @@ export class Renderer {
   }
 }
 
-export { Graphics, Container, Particle, ParticleContainer, Sprite, TilingSprite };
+export { Graphics, Container, Particle, ParticleContainer, Sprite, Texture, TilingSprite };

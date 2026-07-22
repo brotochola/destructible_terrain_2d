@@ -5,7 +5,7 @@ import {
   CAT_WALL,
   CHAR_SIZE,
   FAST_FALL_IMPULSE,
-  JUMP_IMPULSE,
+  JUMP_SPEED,
   W,
   WALK_SPEED,
   H,
@@ -71,11 +71,7 @@ export class Character extends GameObject {
     this.body.setLinearVelocity(Vec2(vx, v.y));
 
     if (keys.KeyW && this.grounded) {
-      this.body.applyLinearImpulse(
-        Vec2(0, -JUMP_IMPULSE),
-        this.body.getPosition(),
-        true,
-      );
+      this.body.setLinearVelocity(Vec2(vx, -JUMP_SPEED));
       this.grounded = false;
     }
     if (keys.KeyS) {
